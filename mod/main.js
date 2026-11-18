@@ -46,6 +46,8 @@ export default class HerdrChat extends View {
     this.mono = settings().font_family;
     this.modelMenu = Boolean(p.models);
     this.mcpMenu = p.mcp ? { servers: null, busy: new Set() } : null;
+    this.remoteMenu = Boolean(p.remote);
+    this.remotePending = false;
     this.picks = new Map();
     this.otherInputs = new Map();
     this.images = new Map();
@@ -106,7 +108,7 @@ export default class HerdrChat extends View {
     const s = this.state;
     const data = {
       key: this.key, pane: this.pane, machine: this.machine, folder: tilde(this.cwd, this.home), branch: this.branch ?? null,
-      model: s.model, mode: s.mode, usage: s.usage ?? null, context: s.context, outputs: this.outputs(), mcp: s.mcp ?? [],
+      model: s.model, mode: s.mode, usage: s.usage ?? null, context: s.context, outputs: this.outputs(), mcp: s.mcp ?? [], remote: s.remote ?? null,
     };
     const json = JSON.stringify(data);
     if (json === this.published) return;
@@ -228,7 +230,7 @@ export default class HerdrChat extends View {
 
   async receive(m, cx) {
     if (m.type === "hello" && m.v !== PROTOCOL) this.error = `engine speaks protocol ${m.v}, this pane ${PROTOCOL}`;
-    else if (m.type === "error") this.error = m.message;
+    else if (m.type === "error") { this.error = m.message; this.remotePending = false; }
     else if (m.type === "auth") await this.openAuth(m.server, m.url);
     else if (m.type === "mcp" && this.mcpMenu) {
       this.mcpMenu = { servers: m.servers, busy: new Set() };
@@ -249,6 +251,7 @@ export default class HerdrChat extends View {
 
   setState(next) {
     const was = this.state.busy;
+    if (next.remote !== this.state.remote) this.remotePending = false;
     if (this.mcpMenu && (!this.mcpMenu.servers || JSON.stringify(next.mcp) !== JSON.stringify(this.state.mcp))) this.send({ type: "mcp_list" });
     this.state = next;
     if (was && !next.busy && !this.visible()) this.unseen = true;
@@ -470,6 +473,26 @@ export default class HerdrChat extends View {
     cx.notify();
   }
 
+  toggleRemoteMenu(cx) {
+    this.remoteMenu = !this.remoteMenu;
+    this.mcpMenu = null;
+    this.modelMenu = false;
+    cx.notify();
+  }
+
+  setRemote(on, cx) {
+    this.remotePending = true;
+    this.send({ type: "remote", enabled: on });
+    cx.notify();
+  }
+
+  copyText(id, text, cx) {
+    cx.write_to_clipboard(text);
+    this.copied = id;
+    cx.notify();
+    cx.timer.after(1500, (cx) => { if (this.copied === id) this.copied = null; cx.notify(); });
+  }
+
   openMcp(cx) {
     this.mcpMenu = { servers: this.mcpMenu?.servers ?? null, busy: new Set() };
     this.modelMenu = false;
@@ -559,6 +582,7 @@ export default class HerdrChat extends View {
     else if (cmds.length && e.keystroke === "escape") { this.input.set_value(""); cx.notify(); }
     else if (this.modelMenu && e.keystroke === "escape") { this.modelMenu = false; cx.notify(); }
     else if (this.mcpMenu && e.keystroke === "escape") { this.mcpMenu = null; cx.notify(); }
+    else if (this.remoteMenu && e.keystroke === "escape") { this.remoteMenu = false; cx.notify(); }
     else if (e.keystroke === "escape" && this.state.busy) this.interrupt(cx);
     else if (e.keystroke === "shift-tab") this.cycleMode(cx);
     else return;

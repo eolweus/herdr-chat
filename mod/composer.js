@@ -1,5 +1,6 @@
 import { div, image } from "gpui-kit";
 import { v_flex, h_flex, Textarea } from "gpui-base";
+import { exec } from "herdr";
 
 export const MODES = [
   ["default", "Ask before edits"],
@@ -36,6 +37,7 @@ export function composer(view, t) {
     .when(view.commandMatches().length > 0, (el) => el.child(commandList(view, t)))
     .when(Boolean(view.modelMenu) && s.models?.length > 0, (el) => el.child(modelList(view, t)))
     .when(Boolean(view.mcpMenu), (el) => el.child(mcpList(view, t)))
+    .when(Boolean(view.remoteMenu), (el) => el.child(remoteCard(view, t)))
     .child(v_flex().w_full().rounded(14).border_1().border_color(view.focusedInput ? t.accent : t.input).bg(t.surface)
       .when(view.attachments.length > 0, (el) => el.child(h_flex().gap(8).px(10).pt(10).flex_wrap()
         .children(view.attachments.map((a, i) => div().relative()
@@ -59,6 +61,10 @@ export function composer(view, t) {
         .child(div().text_color(s.mode === "bypassPermissions" ? t.blocked : s.mode === "plan" ? t.accent : t.muted).child(mode)))
       .when(Boolean(s.model) || s.models?.length > 0, (el) => el.child(chip("model", t).on_click((_e, cx) => view.toggleModels(cx))
         .child(div().child(s.model || "Model")).child(div().text_size(10).child(view.modelMenu ? "⌄" : "›"))))
+      .child(chip("remote", t).tooltip(s.remote ? "Remote Control is on" : "Continue this chat from claude.ai or your phone")
+        .on_click((_e, cx) => view.toggleRemoteMenu(cx))
+        .when(Boolean(s.remote), (el) => el.child(div().size(6).rounded(3).bg(t.done)))
+        .child(div().text_color(s.remote ? t.foreground : t.muted).child(view.remotePending ? "Connecting…" : s.remote ? "Remote on" : "Remote")))
       .child(div().flex_1())
       .when(s.busy, (el) => el.child(h_flex().gap(6).px(6).items_center().text_size(11.5).text_color(t.working)
         .child(div().frames(["◐", "◓", "◑", "◒"], 120))
@@ -123,4 +129,27 @@ function mcpList(view, t) {
           .children(actions(m))),
       ])))
     .child(div().px(14).pb(8).text_size(11).text_color(t.dim).child("Esc to close"));
+}
+
+function remoteCard(view, t) {
+  const url = view.state.remote;
+  const button = (id, label, primary, fn) => div().id(id).flex_none().px(10).py(4).rounded(7).text_size(12).cursor_pointer()
+    .bg(primary ? t.solid : t.raised).text_color(primary ? t.solid_foreground : t.foreground).border_1().border_color(primary ? t.solid : t.border)
+    .hover((s) => s.opacity(0.85)).on_click(fn).child(label);
+  return v_flex().w_full().gap(8).p(14).rounded(12).border_1().border_color(t.border).bg(t.surface)
+    .child(h_flex().items_center()
+      .child(div().flex_1().text_size(13).font_semibold().text_color(t.foreground).child("Remote Control"))
+      .child(div().id("remote-close").px(6).text_size(13).text_color(t.dim).cursor_pointer().hover((s) => s.text_color(t.foreground))
+        .on_click((_e, cx) => { view.remoteMenu = false; cx.notify(); }).child("✕")))
+    .child(div().text_size(12.5).text_color(t.muted).child(url
+      ? "This chat is open on claude.ai/code and in the Claude app on your phone. Messages from either side show up here."
+      : "Continue this chat from claude.ai/code or the Claude app on your phone. It keeps running here, on this machine."))
+    .when(Boolean(url), (el) => el.child(div().text_size(12).text_color(t.dim).truncate().child(url ?? "")))
+    .child(h_flex().gap(8)
+      .when(!url, (el) => el.child(button("remote-on", view.remotePending ? "Connecting…" : "Turn on", true, (_e, cx) => view.setRemote(true, cx))))
+      .when(Boolean(url), (el) => el
+        .child(button("remote-open", "Open in browser", true, () => exec("open", [url])))
+        .child(button("remote-copy", view.copied === "remote" ? "Copied" : "Copy link", false, (_e, cx) => view.copyText("remote", url, cx)))
+        .child(button("remote-off", "Turn off", false, (_e, cx) => view.setRemote(false, cx)))))
+    .child(div().text_size(11).text_color(t.dim).child("New chats start with it on when remoteControlAtStartup is set in ~/.claude/settings.json."));
 }

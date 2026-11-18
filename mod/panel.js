@@ -1,6 +1,6 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { run, setShared, shared, theme } from "herdr";
+import { exec, run, setShared, shared, theme } from "herdr";
 
 const fmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1)}k` : String(n));
 
@@ -24,6 +24,8 @@ export class Panel {
       .child(row(a.machine ? "server" : "monitor", a.machine ?? "This computer"))
       .child(row("folder", a.folder ?? "No folder"))
       .when(Boolean(a.branch), (el) => el.child(row("git-branch", a.branch)))
+      .when(Boolean(a.remote), (el) => el.child(row("monitor", "Remote Control on", div().id("remote-link").text_size(11.5).text_color(t.accent)
+        .cursor_pointer().on_click(() => exec("open", [a.remote])).child("Open"))))
       .when(Boolean(a.model), (el) => el.child(row("file-text", a.model, div().text_size(11.5).text_color(t.dim).child(a.mode ?? ""))));
 
     const u = a.usage;
