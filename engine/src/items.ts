@@ -62,6 +62,7 @@ export type State = {
   commands: Command[];
   models: Model[];
   mcp: Mcp[];
+  remote: string | null;
 };
 
 export type Mcp = { name: string; label: string };

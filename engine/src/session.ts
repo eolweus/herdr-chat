@@ -27,14 +27,15 @@ const label = (name: string) => name.split(":").pop()!.replace(/^claude\.ai /, "
 let knownCommands: State["commands"] = [];
 let knownModels: State["models"] = [];
 
-function defaultMode(): string {
+export function userSettings(): Record<string, any> {
   try {
-    const settings = JSON.parse(readFileSync(`${process.env.HOME}/.claude/settings.json`, "utf8"));
-    return settings.permissions?.defaultMode ?? "default";
+    return JSON.parse(readFileSync(`${process.env.HOME}/.claude/settings.json`, "utf8"));
   } catch {
-    return "default";
+    return {};
   }
 }
+
+const defaultMode = (): string => userSettings().permissions?.defaultMode ?? "default";
 const CLAUDE = Bun.which("claude") ?? `${process.env.HOME}/.local/bin/claude`;
 const RECORD = process.env.HERDR_CHAT_RECORD;
 
@@ -164,6 +165,7 @@ export class Session {
         includePartialMessages: true,
         settingSources: ["user", "project", "local"],
         systemPrompt: { type: "preset", preset: "claude_code" },
+        extraArgs: { "replay-user-messages": null },
         permissionMode: this.options.permissionMode as any,
         model: this.options.model,
         canUseTool: (tool, input, opts) => this.ask(tool, input, opts.toolUseID, opts.suggestions),
@@ -180,7 +182,7 @@ export class Session {
         this.box.close();
         this.box = inbox();
         this.denyAll("Claude stopped");
-        this.n.setState({ busy: false, status: null });
+        this.n.setState({ busy: false, status: null, remote: null });
         this.schedule();
       }
     })();
@@ -193,7 +195,11 @@ export class Session {
     }
     const before = this.state.session;
     this.n.feed(msg);
-    if (msg.type === "system" && msg.subtype === "init") { this.loadCommands(); this.mcp(); }
+    if (msg.type === "system" && msg.subtype === "init") {
+      this.loadCommands();
+      this.mcp();
+      if (this.wantRemote && !this.state.remote) this.remote(true).catch(() => {});
+    }
     if (msg.type === "system" && msg.subtype === "commands_changed") knownCommands = this.state.commands;
     if (this.state.session !== before) this.onSession(this);
     if (msg.type === "result") {
@@ -221,6 +227,17 @@ export class Session {
     const list = await this.q?.mcpServerStatus().catch(() => null);
     if (!list) return;
     this.n.setState({ mcp: list.filter((m) => m.status === "needs-auth").map((m) => ({ name: m.name, label: label(m.name) })) });
+    this.schedule();
+  }
+
+  wantRemote = false;
+
+  async remote(enabled: boolean) {
+    this.wantRemote = enabled;
+    await this.ready();
+    const name = `${this.cwd.split("/").pop() || "herdr"} (herdr)`;
+    const r = await (this.q as any).enableRemoteControl(enabled, enabled ? name : undefined);
+    this.n.setState({ remote: enabled ? (r?.session_url ?? null) : null });
     this.schedule();
   }
 

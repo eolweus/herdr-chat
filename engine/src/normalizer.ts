@@ -11,7 +11,7 @@ export function commandsOf(list: Msg[] | undefined) {
 }
 
 export function newState(): State {
-  return { busy: false, status: null, mode: "default", model: "", context: { used: 0, max: 0 }, queue: [], session: null, usage: null, commands: [], models: [], mcp: [] };
+  return { busy: false, status: null, mode: "default", model: "", context: { used: 0, max: 0 }, queue: [], session: null, usage: null, commands: [], models: [], mcp: [], remote: null };
 }
 
 function textOf(content: unknown): string {
@@ -255,6 +255,8 @@ export class Normalizer {
     const text = cleanUserText(raw);
     const images = imagesOf(content);
     if (text === null && !images.length) return;
+    if (msg.uuid && this.byId.has(msg.uuid)) return;
+    if (!msg.isReplay) this.setState({ busy: true });
     this.upsert({ id: msg.uuid ?? `user:${++this.n}`, kind: "user", text: text ?? "", images });
   }
 

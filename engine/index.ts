@@ -3,7 +3,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { dirname } from "node:path";
 import type { ServerWebSocket } from "bun";
 import { listSessions } from "@anthropic-ai/claude-agent-sdk";
-import { Session, type Client } from "./src/session";
+import { Session, userSettings, type Client } from "./src/session";
 import { ReplaySession } from "./src/replay";
 
 const PROTOCOL = 1;
@@ -27,7 +27,7 @@ function token(): string {
 
 const TOKEN = Buffer.from(token());
 
-type Pane = { session: string | null; cwd: string };
+type Pane = { session: string | null; cwd: string; remote?: boolean };
 const panes: Record<string, Pane> = existsSync(PANES_FILE) ? JSON.parse(readFileSync(PANES_FILE, "utf8")) : {};
 function savePanes() {
   mkdirSync(dirname(PANES_FILE), { recursive: true });
@@ -42,10 +42,11 @@ function open(key: string, cwd: string): Session {
   const known = replay < 0 ? panes[key] : undefined;
   const Kind = replay >= 0 ? ReplaySession : Session;
   const s = new Kind(key, known?.cwd ?? cwd, known?.session ?? null, (s) => {
-    panes[s.key] = { session: s.state.session, cwd: s.cwd };
+    panes[s.key] = { session: s.state.session, cwd: s.cwd, remote: s.wantRemote };
     if (replay < 0) savePanes();
   });
   sessions.set(key, s);
+  if (replay < 0 && (known?.remote ?? userSettings().remoteControlAtStartup === true) && existsSync(s.cwd)) s.remote(true).catch(() => {});
   return s;
 }
 
@@ -89,7 +90,7 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
     if (s.state.busy) return ws.send(JSON.stringify({ type: "error", message: "Stop the current turn first" }));
     s.close();
     sessions.delete(s.key);
-    panes[s.key] = { session: String(m.id), cwd: s.cwd };
+    panes[s.key] = { session: String(m.id), cwd: s.cwd, remote: s.wantRemote };
     if (replay < 0) savePanes();
     const next = open(s.key, s.cwd);
     d.session = next;
@@ -111,6 +112,15 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
       if (url !== undefined) ws.send(JSON.stringify({ type: "auth", server, url }));
       return;
     }
+    case "remote":
+      try {
+        await s.remote(Boolean(m.enabled));
+        panes[s.key] = { session: s.state.session, cwd: s.cwd, remote: s.wantRemote };
+        savePanes();
+      } catch (e: any) {
+        ws.send(JSON.stringify({ type: "error", message: `Remote Control: ${e?.message ?? e}` }));
+      }
+      return;
     case "mcp_list": return ws.send(JSON.stringify({ type: "mcp", servers: await s.servers() }));
     case "mcp_action":
       try {

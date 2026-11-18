@@ -53,6 +53,12 @@ export class ReplaySession extends Session {
     { name: "pencil", label: "pencil", status: "disabled", error: null, tools: 0, scope: "user" },
   ];
 
+  override async remote(enabled: boolean) {
+    this.wantRemote = enabled;
+    this.n.setState({ remote: enabled ? "https://claude.ai/code/session_replay" : null });
+    this.schedule();
+  }
+
   override async servers() {
     return this.fake;
   }
