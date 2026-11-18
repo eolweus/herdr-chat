@@ -157,7 +157,8 @@ export default class HerdrChat extends View {
   publishPane() {
     if (!this.pane || this.other) return;
     const status = this.pending() ? "blocked" : this.state.busy ? "working" : this.unseen ? "done" : null;
-    const json = JSON.stringify({ folder: tilde(this.cwd, this.home), status });
+    const first = this.items.find((i) => i.kind === "user")?.text?.split("\n")[0] ?? null;
+    const json = JSON.stringify({ folder: tilde(this.cwd, this.home), status, title: first && first.slice(0, 80) });
     if (json === this.paneShared) return;
     this.paneShared = json;
     setShared(`herdr-chat:pane:${this.pane}`, JSON.parse(json));
