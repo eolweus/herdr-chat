@@ -1,102 +1,114 @@
-import { query, type SDKUserMessage, type PermissionResult } from "@anthropic-ai/claude-agent-sdk";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomBytes, timingSafeEqual } from "node:crypto";
+import { dirname } from "node:path";
 import type { ServerWebSocket } from "bun";
+import { Session, type Client } from "./src/session";
+import { ReplaySession } from "./src/replay";
 
+const PROTOCOL = 1;
+const HOME = process.env.HOME!;
 const PORT = Number(process.env.HERDR_CHAT_PORT ?? 7777);
-const CLAUDE = Bun.which("claude") ?? undefined;
+const HOSTS = (process.env.HERDR_CHAT_HOSTS ?? "127.0.0.1").split(",").filter(Boolean);
+const TOKEN_FILE = `${HOME}/.config/herdr-chat/token`;
+const PANES_FILE = `${HOME}/.local/state/herdr-chat/panes.json`;
 
-type Session = {
-  push: (m: SDKUserMessage) => void;
-  pending: Map<string, (r: PermissionResult) => void>;
-  q?: ReturnType<typeof query>;
-};
+const replay = process.argv.indexOf("--replay");
+if (replay >= 0) ReplaySession.fixture = process.argv[replay + 1]!;
 
-function inbox() {
-  const queue: SDKUserMessage[] = [];
-  let wake: (() => void) | null = null;
-  async function* iter() {
-    for (;;) {
-      while (queue.length) yield queue.shift()!;
-      await new Promise<void>((r) => (wake = r));
-    }
-  }
-  return {
-    iter: iter(),
-    push(m: SDKUserMessage) {
-      queue.push(m);
-      wake?.();
-      wake = null;
-    },
-  };
+function token(): string {
+  if (existsSync(TOKEN_FILE)) return readFileSync(TOKEN_FILE, "utf8").trim();
+  mkdirSync(dirname(TOKEN_FILE), { recursive: true });
+  const t = randomBytes(32).toString("hex");
+  writeFileSync(TOKEN_FILE, t + "\n", { mode: 0o600 });
+  chmodSync(TOKEN_FILE, 0o600);
+  return t;
 }
 
-const send = (ws: ServerWebSocket<Session>, o: unknown) => ws.send(JSON.stringify(o));
+const TOKEN = Buffer.from(token());
 
-function start(ws: ServerWebSocket<Session>, cwd: string, resume?: string) {
-  const box = inbox();
-  ws.data.push = box.push;
-  const q = query({
-    prompt: box.iter,
-    options: {
-      cwd,
-      resume,
-      pathToClaudeCodeExecutable: CLAUDE,
-      includePartialMessages: true,
-      settingSources: ["user", "project", "local"],
-      canUseTool: (toolName, input, { suggestions }) =>
-        new Promise((resolve) => {
-          const id = crypto.randomUUID();
-          ws.data.pending.set(id, resolve);
-          send(ws, { type: "permission_request", id, toolName, input, suggestions });
-        }),
+type Pane = { session: string | null; cwd: string };
+const panes: Record<string, Pane> = existsSync(PANES_FILE) ? JSON.parse(readFileSync(PANES_FILE, "utf8")) : {};
+function savePanes() {
+  mkdirSync(dirname(PANES_FILE), { recursive: true });
+  writeFileSync(PANES_FILE, JSON.stringify(panes, null, 2));
+}
+
+const sessions = new Map<string, Session>();
+
+function open(key: string, cwd: string): Session {
+  const live = sessions.get(key);
+  if (live) return live;
+  const known = replay < 0 ? panes[key] : undefined;
+  const Kind = replay >= 0 ? ReplaySession : Session;
+  const s = new Kind(key, known?.cwd ?? cwd, known?.session ?? null, (s) => {
+    panes[s.key] = { session: s.state.session, cwd: s.cwd };
+    if (replay < 0) savePanes();
+  });
+  sessions.set(key, s);
+  return s;
+}
+
+type Data = { authed: boolean; session: Session | null; client: Client };
+
+function authed(t: unknown) {
+  const b = Buffer.from(String(t ?? ""));
+  return b.length === TOKEN.length && timingSafeEqual(b, TOKEN);
+}
+
+async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
+  const d = ws.data;
+  if (m.type === "hello") {
+    if (!authed(m.token)) {
+      ws.send(JSON.stringify({ type: "error", fatal: true, message: "Wrong token" }));
+      return ws.close(4001, "unauthorized");
+    }
+    d.authed = true;
+    return ws.send(JSON.stringify({ type: "hello", v: PROTOCOL, replay: replay >= 0 }));
+  }
+  if (!d.authed) return ws.close(4001, "unauthorized");
+  if (m.type === "open") {
+    d.session?.detach(d.client);
+    const s = open(String(m.key || crypto.randomUUID()), String(m.cwd || HOME));
+    d.session = s;
+    await s.load();
+    return s.attach(d.client);
+  }
+  const s = d.session;
+  if (!s) return;
+  switch (m.type) {
+    case "prompt": return s.prompt(String(m.text ?? ""), Array.isArray(m.images) ? m.images : []);
+    case "unqueue": return s.unqueue(String(m.id));
+    case "interrupt": return s.interrupt();
+    case "answer": return s.answer(m as any);
+    case "set": return s.set(m);
+  }
+}
+
+for (const hostname of HOSTS) {
+  Bun.serve<Data>({
+    hostname,
+    port: PORT,
+    fetch(req, server) {
+      if (server.upgrade(req, { data: { authed: false, session: null, client: null as unknown as Client } })) return;
+      return new Response("herdr-chat engine\n");
+    },
+    websocket: {
+      idleTimeout: 0,
+      open(ws) {
+        ws.data.client = { send: (o) => ws.send(JSON.stringify(o)) };
+      },
+      async message(ws, raw) {
+        try {
+          await handle(ws, JSON.parse(String(raw)));
+        } catch (e) {
+          ws.send(JSON.stringify({ type: "error", message: String(e) }));
+        }
+      },
+      close(ws) {
+        ws.data.session?.detach(ws.data.client);
+      },
     },
   });
-  ws.data.q = q;
-  (async () => {
-    try {
-      for await (const msg of q) send(ws, { type: "sdk", msg });
-    } catch (e) {
-      send(ws, { type: "error", message: String(e) });
-    }
-  })();
 }
 
-Bun.serve<Session, undefined>({
-  hostname: "127.0.0.1",
-  port: PORT,
-  fetch(req, server) {
-    if (server.upgrade(req, { data: { push: () => {}, pending: new Map() } })) return;
-    return new Response("herdr-chat engine\n");
-  },
-  websocket: {
-    message(ws, raw) {
-      const m = JSON.parse(String(raw));
-      switch (m.type) {
-        case "start":
-          return start(ws, m.cwd, m.resume);
-        case "prompt": {
-          const content: any[] = [];
-          for (const img of m.images ?? [])
-            content.push({ type: "image", source: { type: "base64", media_type: "image/png", data: img } });
-          content.push({ type: "text", text: m.text });
-          return ws.data.push({ type: "user", message: { role: "user", content }, parent_tool_use_id: null });
-        }
-        case "permission": {
-          const resolve = ws.data.pending.get(m.id);
-          ws.data.pending.delete(m.id);
-          return resolve?.(m.allow ? { behavior: "allow", updatedInput: m.input } : { behavior: "deny", message: "User denied" });
-        }
-        case "interrupt":
-          return void ws.data.q?.interrupt();
-        case "echo_image":
-          // spike: send a local PNG back as bytes to test the binary path
-          return void Bun.file(m.path).bytes().then((b) => ws.send(b));
-      }
-    },
-    close(ws) {
-      for (const r of ws.data.pending.values()) r({ behavior: "deny", message: "Disconnected" });
-      ws.data.q?.close?.();
-    },
-  },
-});
-
-console.log(`herdr-chat engine on ws://127.0.0.1:${PORT}`);
+console.log(`herdr-chat engine on ${HOSTS.map((h) => `${h}:${PORT}`).join(", ")}${replay >= 0 ? ` replaying ${ReplaySession.fixture}` : ""}`);
