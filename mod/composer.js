@@ -34,6 +34,7 @@ export function composer(view, t) {
         .child(div().id(`unq-${q.id}`).px(4).cursor_pointer().text_color(t.dim).hover((s) => s.text_color(t.foreground))
           .on_click((_e, cx) => view.unqueue(q.id, cx)).child("✕"))))))
     .when(view.commandMatches().length > 0, (el) => el.child(commandList(view, t)))
+    .when(Boolean(view.modelMenu) && s.models?.length > 0, (el) => el.child(modelList(view, t)))
     .child(v_flex().w_full().rounded(14).border_1().border_color(view.focusedInput ? t.accent : t.input).bg(t.surface)
       .when(view.attachments.length > 0, (el) => el.child(h_flex().gap(8).px(10).pt(10).flex_wrap()
         .children(view.attachments.map((a, i) => div().relative()
@@ -55,7 +56,8 @@ export function composer(view, t) {
     .child(h_flex().px(4).gap(4).items_center()
       .child(chip("mode", t).tooltip("Shift-Tab to change").on_click((_e, cx) => view.cycleMode(cx))
         .child(div().text_color(s.mode === "bypassPermissions" ? t.blocked : s.mode === "plan" ? t.accent : t.muted).child(mode)))
-      .when(Boolean(s.model), (el) => el.child(div().px(6).text_size(11.5).text_color(t.dim).child(s.model)))
+      .when(Boolean(s.model) || s.models?.length > 0, (el) => el.child(chip("model", t).on_click((_e, cx) => view.toggleModels(cx))
+        .child(div().child(s.model || "Model")).child(div().text_size(10).child(view.modelMenu ? "⌄" : "›"))))
       .child(div().flex_1())
       .when(s.busy, (el) => el.child(h_flex().gap(6).px(6).items_center().text_size(11.5).text_color(t.working)
         .child(div().frames(["◐", "◓", "◑", "◒"], 120))
@@ -73,4 +75,12 @@ function commandList(view, t) {
       .when(Boolean(c.hint), (el) => el.child(div().flex_none().text_size(12).text_color(t.dim).child(c.hint)))
       .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.muted).child(c.description))))
     .child(div().px(10).pt(4).pb(2).text_size(11).text_color(t.dim).child("↑↓ to move · Tab or Enter to pick · Esc to clear"));
+}
+
+function modelList(view, t) {
+  return v_flex().w_full().p(4).rounded(12).border_1().border_color(t.border).bg(t.surface)
+    .children(view.state.models.map((m) => h_flex().id(`model-${m.value}`).gap(10).px(10).py(6).rounded(8).items_baseline().cursor_pointer()
+      .hover((s) => s.bg(t.hover)).on_click((_e, cx) => view.pickModel(m.value, cx))
+      .child(div().flex_none().text_size(13).font_semibold().text_color(t.foreground).child(m.name))
+      .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.muted).child(m.description))));
 }

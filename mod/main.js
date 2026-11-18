@@ -44,6 +44,7 @@ export default class HerdrChat extends View {
     this.expanded = new Set();
     this.expandAll = Boolean(p.expand);
     this.mono = settings().font_family;
+    this.modelMenu = Boolean(p.models);
     this.picks = new Map();
     this.otherInputs = new Map();
     this.images = new Map();
@@ -428,6 +429,17 @@ export default class HerdrChat extends View {
     cx.notify();
   }
 
+  toggleModels(cx) {
+    this.modelMenu = !this.modelMenu;
+    cx.notify();
+  }
+
+  pickModel(value, cx) {
+    this.send({ type: "set", model: value });
+    this.modelMenu = false;
+    cx.notify();
+  }
+
   cycleMode(cx) {
     const next = CYCLE[(CYCLE.indexOf(this.state.mode) + 1) % CYCLE.length];
     this.send({ type: "set", mode: next });
@@ -489,6 +501,7 @@ export default class HerdrChat extends View {
       cx.notify();
     } else if (cmds.length && e.keystroke === "tab") this.complete(cmds[this.commandAt] ?? cmds[0], cx);
     else if (cmds.length && e.keystroke === "escape") { this.input.set_value(""); cx.notify(); }
+    else if (this.modelMenu && e.keystroke === "escape") { this.modelMenu = false; cx.notify(); }
     else if (e.keystroke === "escape" && this.state.busy) this.interrupt(cx);
     else if (e.keystroke === "shift-tab") this.cycleMode(cx);
     else return;
