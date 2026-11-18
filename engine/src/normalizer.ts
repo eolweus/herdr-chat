@@ -6,8 +6,12 @@ type Msg = Record<string, any>;
 const RESULT_LIMIT = 4000;
 const HIDDEN_TOOLS = new Set(["AskUserQuestion"]);
 
+export function commandsOf(list: Msg[] | undefined) {
+  return (list ?? []).map((c) => ({ name: c.name, description: c.description ?? "", hint: c.argumentHint ?? "" }));
+}
+
 export function newState(): State {
-  return { busy: false, status: null, mode: "default", model: "", context: { used: 0, max: 0 }, queue: [], session: null, usage: null };
+  return { busy: false, status: null, mode: "default", model: "", context: { used: 0, max: 0 }, queue: [], session: null, usage: null, commands: [] };
 }
 
 function textOf(content: unknown): string {
@@ -91,6 +95,8 @@ export class Normalizer {
         return this.setState({ model: msg.model, mode: msg.permissionMode, session: msg.session_id });
       case "status":
         return this.setState({ status: msg.status === "compacting" ? "Compacting" : null });
+      case "commands_changed":
+        return this.setState({ commands: commandsOf(msg.commands) });
       case "compact_boundary":
         return this.notice("info", "Compacted the conversation");
       case "api_retry":

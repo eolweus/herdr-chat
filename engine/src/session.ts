@@ -2,7 +2,7 @@ import { getSessionMessages, query, type PermissionResult, type PermissionUpdate
 import { appendFileSync, mkdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { Image, Item, State } from "./items";
-import { Normalizer } from "./normalizer";
+import { Normalizer, commandsOf } from "./normalizer";
 import { describe } from "./tools";
 
 export type Client = { send(o: unknown): void };
@@ -22,6 +22,7 @@ type Pending = {
 };
 
 const FLUSH_MS = 50;
+let knownCommands: State["commands"] = [];
 const CLAUDE = Bun.which("claude") ?? `${process.env.HOME}/.local/bin/claude`;
 const RECORD = process.env.HERDR_CHAT_RECORD;
 
@@ -56,6 +57,7 @@ export class Session {
   constructor(public key: string, public cwd: string, sessionId: string | null, private onSession: (s: Session) => void) {
     this.n = new Normalizer(cwd);
     this.n.state.session = sessionId;
+    this.n.state.commands = knownCommands;
   }
 
   get state(): State {
@@ -176,6 +178,8 @@ export class Session {
     }
     const before = this.state.session;
     this.n.feed(msg);
+    if (msg.type === "system" && msg.subtype === "init") this.loadCommands();
+    if (msg.type === "system" && msg.subtype === "commands_changed") knownCommands = this.state.commands;
     if (this.state.session !== before) this.onSession(this);
     if (msg.type === "result") {
       this.usage();
@@ -183,6 +187,16 @@ export class Session {
       if (next) { this.send(next); this.changed(); }
     }
     this.schedule();
+  }
+
+  private async loadCommands() {
+    try {
+      const list = await this.q?.supportedCommands();
+      if (!list) return;
+      knownCommands = commandsOf(list);
+      this.n.setState({ commands: knownCommands });
+      this.schedule();
+    } catch {}
   }
 
   protected async usage() {

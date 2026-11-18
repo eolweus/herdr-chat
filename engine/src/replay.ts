@@ -11,6 +11,18 @@ export class ReplaySession extends Session {
   static fixture = "";
   private round = 0;
 
+  override async load() {
+    this.n.state.commands = [
+      { name: "compact", description: "Clear history but keep a summary in context", hint: "<instructions>" },
+      { name: "context", description: "Show current context usage", hint: "" },
+      { name: "review", description: "Review a pull request", hint: "<pr>" },
+      { name: "init", description: "Initialize a CLAUDE.md file", hint: "" },
+      { name: "model", description: "Set the AI model", hint: "<model>" },
+      { name: "commit", description: "Create a git commit", hint: "" },
+    ];
+    await super.load();
+  }
+
   protected override async usage() {
     const categories = [
       { id: "messages", name: "Messages", tokens: 41200, kind: "used" },

@@ -59,7 +59,10 @@ export type State = {
   queue: { id: string; text: string; images: number }[];
   session: string | null;
   usage: Usage | null;
+  commands: Command[];
 };
+
+export type Command = { name: string; description: string; hint: string };
 
 export type Usage = {
   total: number;
