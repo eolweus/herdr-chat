@@ -1,11 +1,14 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, TextareaState, InputState, ScrollHandle } from "gpui-base";
-import { appHome, checking, exec, focused, home, nextCommand, notify, panes, props, readTextFile, theme } from "herdr";
+import { appHome, checking, exec, focused, home, nextCommand, notify, openOverlay, panes, props, readTextFile, settings, setShared, shared, theme } from "herdr";
 import { WebSocket } from "websocket";
 import * as fs from "fs/promises";
 import { Buffer } from "buffer";
 import { CodeCache } from "./markdown.js";
-import { userRow, textRow, thinkingRow, toolRow, noticeRow, endRow } from "./rows.js";
+import { userRow, textRow, thinkingRow, toolRow, noticeRow, endRow, groupRow } from "./rows.js";
+import { Viewer } from "./viewer.js";
+import { Panel } from "./panel.js";
+import { FileView } from "./fileview.js";
 import { permissionCard, questionCard } from "./cards.js";
 import { composer } from "./composer.js";
 
@@ -22,6 +25,9 @@ const tilde = (path, h) => (h && path?.startsWith(h) ? `~${path.slice(h.length)}
 export default class HerdrChat extends View {
   init(_props, cx) {
     const p = props() ?? {};
+    if (p.viewer) return void (this.other = new Viewer(p, cx));
+    if (p.panel) return void (this.other = new Panel());
+    if (p.file) return void (this.other = new FileView(p, cx));
     this.key = p.key ?? null;
     this.machine = p.machine || null;
     this.cwd = p.cwd ?? focused()?.cwd ?? null;
@@ -32,6 +38,8 @@ export default class HerdrChat extends View {
     this.error = null;
     this.codes = new CodeCache();
     this.expanded = new Set();
+    this.expandAll = Boolean(p.expand);
+    this.mono = settings().font_family;
     this.picks = new Map();
     this.otherInputs = new Map();
     this.images = new Map();
@@ -45,7 +53,7 @@ export default class HerdrChat extends View {
     this.input.on("submit", (e, cx) => this.enter(e, cx));
     this.input.on("paste_other", (_e, cx) => this.pasteImage(cx));
     this.input.on("change", (_e, cx) => cx.notify());
-    this.input.on("focus", (_e, cx) => { this.focusedInput = true; this.findPane(); cx.notify(); });
+    this.input.on("focus", (_e, cx) => { this.focusedInput = true; this.findPane(); this.publish(true); cx.notify(); });
     this.input.on("blur", (_e, cx) => { this.focusedInput = false; cx.notify(); });
     this.handle = cx.focus_handle();
     this.input.focus();
@@ -55,10 +63,69 @@ export default class HerdrChat extends View {
     cx.spawn(async (cx) => this.connect(cx));
     cx.spawn(async (cx) => {
       for (;;) {
-        if ((await nextCommand()) === "focus") this.input.focus();
+        const c = await nextCommand();
+        if (c === "focus") this.input.focus();
+        else if (c === "compact" && this.active()) this.send({ type: "prompt", text: "/compact", images: [] });
         cx.notify();
       }
     });
+  }
+
+  active() {
+    return shared("herdr-chat:active")?.key === this.key;
+  }
+
+  outputs() {
+    const files = new Map();
+    for (const i of this.items) {
+      if (i.kind !== "tool" || i.status !== "ok" || !i.path || !["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(i.name)) continue;
+      const f = files.get(i.path) ?? { path: i.path, name: i.meta, created: i.name === "Write", add: 0, del: 0 };
+      for (const l of (i.detail ?? "").split("\n")) {
+        if (l.startsWith("+")) f.add++;
+        else if (l.startsWith("-")) f.del++;
+      }
+      files.delete(i.path);
+      files.set(i.path, f);
+    }
+    return [...files.values()].reverse();
+  }
+
+  // Feeds the side panel; only the chat focused last writes, and only when something it shows changed.
+  publish(force) {
+    if (!this.key || (!force && !this.active())) return;
+    const s = this.state;
+    const data = {
+      key: this.key, pane: this.pane, machine: this.machine, folder: tilde(this.cwd, this.home), branch: this.branch ?? null,
+      model: s.model, mode: s.mode, usage: s.usage ?? null, context: s.context, outputs: this.outputs(),
+    };
+    const json = JSON.stringify(data);
+    if (json === this.published) return;
+    this.published = json;
+    setShared("herdr-chat:active", data);
+  }
+
+  viewImages(paths, index) {
+    openOverlay({ mod: "herdr-chat", props: { viewer: { paths, index } }, kind: "dialog", frame: "none", width: 0.92, height: 0.92 });
+  }
+
+  // Tools and thinking between two messages collapse into one summary line.
+  blocks(shown) {
+    const out = [];
+    let group = null;
+    for (const item of shown) {
+      if (item.kind === "tool" || item.kind === "thinking") {
+        if (!group) {
+          group = { kind: "group", id: `g:${item.id}`, items: [] };
+          if (this.expandAll) this.expanded.add(group.id);
+          out.push(group);
+        }
+        group.items.push(item);
+      } else {
+        group = null;
+        out.push(item);
+      }
+    }
+    return out.map((b) => (b.kind === "group" && !b.items.some((i) => i.kind === "tool") ? (b.items.length === 1 ? b.items[0] : b) : b));
   }
 
   async close() {
@@ -72,8 +139,8 @@ export default class HerdrChat extends View {
   }
 
   async endpoint() {
-    let url = `ws://127.0.0.1:${PORT}`;
-    if (this.machine) {
+    let url = props()?.engine ?? `ws://127.0.0.1:${PORT}`;
+    if (this.machine && !props()?.engine) {
       const map = JSON.parse((await readTextFile(`${appHome()}/${DATA}/machines.json`).catch(() => null)) ?? "{}");
       if (map[this.machine]) url = map[this.machine];
       else {
@@ -89,6 +156,10 @@ export default class HerdrChat extends View {
 
   async connect(cx) {
     await fs.mkdir(`${appHome()}/${DATA}/img`, { recursive: true }).catch(() => {});
+    this.home = this.machine ? null : home();
+    exec("sh", ["-c", `printf '%s\\n' "$HOME"; git -C '${(this.cwd ?? "").replace(/'/g, "'\\''")}' branch --show-current 2>/dev/null`], { on: this.machine })
+      .then((r) => { const [h, b] = r.stdout.split("\n"); this.home = h || this.home; this.branch = b || null; this.publish(false); cx.notify(); })
+      .catch(() => {});
     let delay = 1000;
     for (;;) {
       try {
@@ -137,8 +208,9 @@ export default class HerdrChat extends View {
   setState(next) {
     const was = this.state.busy;
     this.state = next;
+    this.publish(false);
     if (was && !next.busy && !this.visible()) {
-      notify({ title: "Claude finished", body: tilde(this.cwd, home()), level: "success", action: this.focusAction() });
+      notify({ title: "Claude finished", body: tilde(this.cwd, this.home), level: "success", action: this.focusAction() });
     }
   }
 
@@ -158,6 +230,7 @@ export default class HerdrChat extends View {
     if (item.images?.length) await this.saveImages(item);
     if (live && !prev && (item.kind === "permission" || item.kind === "question") && item.state === "pending") this.alert(item);
     if (this.following) this.stick = true;
+    if (live && item.kind === "tool" && item.status === "ok" && item.path) this.publish(false);
   }
 
   detailLang(tool) {
@@ -360,38 +433,31 @@ export default class HerdrChat extends View {
       case "question": return questionCard(item, t, this);
       case "notice": return noticeRow(item, t);
       case "turn_end": return endRow(item, t);
+      case "group": return groupRow(item, t, this, children);
     }
     return div();
   }
 
-  header(t) {
-    const s = this.state;
-    const status = this.conn !== "connected"
-      ? div().text_color(this.conn === "offline" ? t.blocked : t.dim).truncate()
-        .child(this.conn === "offline" ? `Offline${this.error ? `: ${this.error}` : ""} · retrying` : "Connecting…")
-      : s.busy
-        ? h_flex().gap(6).items_center().text_color(t.working)
-          .child(div().frames(["◐", "◓", "◑", "◒"], 120))
-          .child(div().child(s.status ?? "Working"))
-        : div();
-    return h_flex().h(34).px(16).gap(10).items_center().flex_none().border_b_1().border_color(t.border).text_size(12)
-      .child(div().font_semibold().text_color(t.foreground).child("Claude"))
-      .child(div().flex_1().min_w(0).truncate().text_color(t.dim)
-        .child(`${this.machine ? `${this.machine} · ` : ""}${tilde(this.cwd, this.machine ? null : home())}`))
-      .child(status);
+  banner(t) {
+    const offline = this.conn === "offline";
+    return h_flex().px(16).py(6).gap(8).flex_none().items_center().text_size(12).border_b_1().border_color(t.border)
+      .bg(offline ? t.surface : t.background).text_color(offline ? t.blocked : t.dim)
+      .child(div().truncate().child(offline ? `Can't reach the engine on ${this.machine ?? "this computer"}${this.error ? `: ${this.error}` : ""} · retrying` : "Connecting…"));
   }
 
   empty(t) {
     return v_flex().flex_1().items_center().justify_center().gap(8)
       .child(div().text_size(20).text_color(t.foreground).child("What should we work on?"))
-      .child(div().text_size(12.5).text_color(t.dim).child(tilde(this.cwd, this.machine ? null : home()) || ""));
+      .child(div().text_size(12.5).text_color(t.dim).child(tilde(this.cwd, this.home) || ""));
   }
 
   render() {
+    if (this.other) return this.other.render();
     const t = theme();
     const children = new Map();
     for (const i of this.items) if (i.kind === "tool" && i.parent) children.set(i.parent, [...(children.get(i.parent) ?? []), i]);
-    const shown = this.items.filter((i) => !(i.kind === "tool" && i.parent && this.byId.has(i.parent)));
+    if (this.expandAll) for (const i of this.items) this.expanded.add(i.id);
+    const shown = this.blocks(this.items.filter((i) => !(i.kind === "tool" && i.parent && this.byId.has(i.parent))));
     if (this.stick && shown.length) {
       this.scroll.scroll_to_item(shown.length);
       this.stick = false;
@@ -405,7 +471,7 @@ export default class HerdrChat extends View {
       .on_key_down((e, cx) => this.key(e, cx))
       .on_drop((e, cx) => cx.spawn(async (cx) => this.drop(e.paths, cx)))
       .on_click((_e, cx) => { this.findPane(); cx.notify(); })
-      .child(this.header(t))
+      .when(this.conn !== "connected", (el) => el.child(this.banner(t)))
       .child(shown.length ? div().relative().flex_1().min_h(0).flex().flex_col()
         .child(transcript)
         .when(!this.following, (el) => el.child(div().absolute().bottom(10).w_full().flex().justify_center()

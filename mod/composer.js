@@ -53,5 +53,8 @@ export function composer(view, t) {
         .child(div().text_color(s.mode === "bypassPermissions" ? t.blocked : s.mode === "plan" ? t.accent : t.muted).child(mode)))
       .when(Boolean(s.model), (el) => el.child(div().px(6).text_size(11.5).text_color(t.dim).child(s.model)))
       .child(div().flex_1())
+      .when(s.busy, (el) => el.child(h_flex().gap(6).px(6).items_center().text_size(11.5).text_color(t.working)
+        .child(div().frames(["◐", "◓", "◑", "◒"], 120))
+        .child(div().child(s.status ?? "Working"))))
       .child(meter(s, t)));
 }
