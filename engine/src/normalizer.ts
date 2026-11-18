@@ -4,7 +4,7 @@ import { describe } from "./tools";
 type Msg = Record<string, any>;
 
 const RESULT_LIMIT = 4000;
-const HIDDEN_TOOLS = new Set(["AskUserQuestion"]);
+const HIDDEN_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
 
 export function commandsOf(list: Msg[] | undefined) {
   return (list ?? []).map((c) => ({ name: c.name, description: c.description ?? "", hint: c.argumentHint ?? "" }));
@@ -200,6 +200,9 @@ export class Normalizer {
         if (b.name === "AskUserQuestion" && !this.byId.has(`q:${b.id}`)) {
           this.upsert({ id: `q:${b.id}`, kind: "question", questions: b.input?.questions ?? [], state: "pending" });
         }
+        if (b.name === "ExitPlanMode" && !this.byId.has(`perm:${b.id}`)) {
+          this.upsert({ id: `perm:${b.id}`, kind: "permission", tool: "ExitPlanMode", verb: "Plan", meta: "", plan: String(b.input?.plan ?? ""), remember: false, state: "pending" });
+        }
         if (HIDDEN_TOOLS.has(b.name)) this.hidden.add(b.id);
         else this.tool(b.id, b.name, b.input);
         continue;
@@ -229,6 +232,11 @@ export class Normalizer {
         const answers = msg.tool_use_result?.answers;
         Object.assign(q, r.is_error || !answers ? { state: "skipped" } : { state: "answered", answers });
         this.touch(q);
+      }
+      const plan = this.byId.get(`perm:${r.tool_use_id}`);
+      if (plan?.kind === "permission" && plan.state === "pending") {
+        plan.state = r.is_error ? "denied" : "allowed";
+        this.touch(plan);
       }
       if (this.hidden.has(r.tool_use_id)) continue;
       const t = this.byId.get(r.tool_use_id);

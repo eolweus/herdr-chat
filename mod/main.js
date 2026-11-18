@@ -115,6 +115,7 @@ export default class HerdrChat extends View {
     const out = [];
     let group = null;
     for (const item of shown) {
+      if (item.kind === "permission" && item.state === "allowed" && !item.plan) continue;
       if (item.kind === "tool" || item.kind === "thinking") {
         if (!group) {
           group = { kind: "group", id: `g:${item.id}`, items: [] };

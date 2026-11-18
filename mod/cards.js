@@ -19,7 +19,14 @@ const settled = (text, t) => div().text_size(12).text_color(t.dim).child(text);
 
 export function permissionCard(item, t, view) {
   const pending = item.state === "pending";
-  const title = item.tool === "ExitPlanMode" ? "Ready to code?" : `Allow ${item.tool}?`;
+  if (!pending && !item.plan) {
+    const ok = item.state === "allowed";
+    return h_flex().w_full().px(22).py(4).gap(8).items_center().text_size(12.5).text_color(t.dim).min_w(0)
+      .child(div().flex_none().text_color(ok ? t.done : t.blocked).child(ok ? "✓" : "✕"))
+      .child(div().flex_none().child(`${ok ? "Allowed" : "Denied"} ${item.tool}`))
+      .child(div().flex_1().min_w(0).truncate().child(item.meta));
+  }
+  const title = item.tool === "ExitPlanMode" ? (pending ? "Ready to code?" : "Plan") : `Allow ${item.tool}?`;
   return v_flex().w_full().px(22).py(6).child(card(t, pending)
     .child(h_flex().gap(8).items_baseline().min_w(0)
       .child(div().flex_none().text_size(13.5).font_semibold().child(title))
@@ -35,7 +42,7 @@ export function permissionCard(item, t, view) {
           .when(item.remember, (el) => el.child(button(`session-${item.id}`, "Allow for this session", t, "", (_e, cx) => view.answer({ item: item.id, decision: "session" }, cx))))
           .child(button(`deny-${item.id}`, item.tool === "ExitPlanMode" ? "Keep planning" : "Deny", t, "danger", (_e, cx) => view.answer({ item: item.id, decision: "deny" }, cx))))
         .child(div().text_size(11.5).text_color(t.dim).child("Or type below to deny and tell Claude what to do instead"))
-      : settled(item.state === "allowed" ? "Allowed" : "Denied", t)));
+      : settled(item.tool === "ExitPlanMode" ? (item.state === "allowed" ? "Approved" : "Kept planning") : item.state === "allowed" ? "Allowed" : "Denied", t)));
 }
 
 export function questionCard(item, t, view) {
