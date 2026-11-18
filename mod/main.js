@@ -1,116 +1,303 @@
-import { View, div, image } from "gpui-kit";
-import { v_flex, h_flex, TextView, TextareaState, Textarea, ScrollHandle } from "gpui-base";
-import { appHome, checking, exec, focused, props, theme } from "herdr";
+import { View, div } from "gpui-kit";
+import { v_flex, h_flex, TextareaState, InputState, ScrollHandle } from "gpui-base";
+import { appHome, checking, exec, focused, home, nextCommand, notify, panes, props, readTextFile, theme } from "herdr";
 import { WebSocket } from "websocket";
 import * as fs from "fs/promises";
 import { Buffer } from "buffer";
+import { CodeCache } from "./markdown.js";
+import { userRow, textRow, thinkingRow, toolRow, noticeRow, endRow } from "./rows.js";
+import { permissionCard, questionCard } from "./cards.js";
+import { composer } from "./composer.js";
 
-const URL = "ws://127.0.0.1:7777";
+const PROTOCOL = 1;
+const PORT = 7777;
 const DATA = "data/herdr-chat";
+const IMAGE_EXT = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
+const MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
+const CYCLE = ["default", "acceptEdits", "plan", "auto"];
+
+const safe = (s) => s.replace(/[^A-Za-z0-9_-]/g, "_");
+const tilde = (path, h) => (h && path?.startsWith(h) ? `~${path.slice(h.length)}` : path ?? "");
 
 export default class HerdrChat extends View {
   init(_props, cx) {
+    const p = props() ?? {};
+    this.key = p.key ?? null;
+    this.machine = p.machine || null;
+    this.cwd = p.cwd ?? focused()?.cwd ?? null;
     this.items = [];
-    this.blocks = {};
+    this.byId = new Map();
+    this.state = { busy: false, status: null, mode: "default", model: "", context: { used: 0, max: 0 }, queue: [], session: null };
+    this.conn = "connecting";
+    this.error = null;
+    this.codes = new CodeCache();
+    this.expanded = new Set();
+    this.picks = new Map();
+    this.otherInputs = new Map();
+    this.images = new Map();
     this.attachments = [];
-    this.status = "connecting";
-    this.log = [];
+    this.following = true;
+    this.stick = true;
+    this.pane = null;
     this.scroll = ScrollHandle.new();
-    this.input = TextareaState.new({ placeholder: "Message Claude…" });
-    this.input.set_auto_grow(1, 10);
-    this.input.on("submit", (_e, cx) => this.submit(cx));
+    this.input = TextareaState.new({ placeholder: "Ask Claude…" });
+    this.input.set_auto_grow(1, 12);
+    this.input.on("submit", (e, cx) => this.enter(e, cx));
     this.input.on("paste_other", (_e, cx) => this.pasteImage(cx));
+    this.input.on("change", (_e, cx) => cx.notify());
+    this.input.on("focus", (_e, cx) => { this.focusedInput = true; this.findPane(); cx.notify(); });
+    this.input.on("blur", (_e, cx) => { this.focusedInput = false; cx.notify(); });
+    this.handle = cx.focus_handle();
+    this.input.focus();
+    cx.timer.after(150, () => this.input.focus());
+    cx.timer.after(400, () => this.findPane());
     if (checking()) return;
     cx.spawn(async (cx) => this.connect(cx));
+    cx.spawn(async (cx) => {
+      for (;;) {
+        if ((await nextCommand()) === "focus") this.input.focus();
+        cx.notify();
+      }
+    });
+  }
+
+  async close() {
+    await this.ws?.close().catch(() => {});
+  }
+
+  // A pane mod isn't told its own pane id; it's the focused herdr-chat pane right after opening or a click.
+  findPane() {
+    const f = focused()?.pane;
+    if (f && panes().find((x) => x.pane === f)?.mod === "herdr-chat") this.pane = f;
+  }
+
+  async endpoint() {
+    let url = `ws://127.0.0.1:${PORT}`;
+    if (this.machine) {
+      const map = JSON.parse((await readTextFile(`${appHome()}/${DATA}/machines.json`).catch(() => null)) ?? "{}");
+      if (map[this.machine]) url = map[this.machine];
+      else {
+        const r = await exec("ssh", ["-G", this.machine]);
+        const host = r.stdout.match(/^hostname (\S+)/m)?.[1] ?? this.machine;
+        url = `ws://${host}:${PORT}`;
+      }
+    }
+    const r = await exec("sh", ["-c", "cat ~/.config/herdr-chat/token"], { on: this.machine });
+    if (r.code !== 0) throw new Error(`no engine token on ${this.machine ?? "this computer"} (run scripts/install.sh there)`);
+    return { url, token: r.stdout.trim() };
   }
 
   async connect(cx) {
-    const machine = props()?.machine;
-    if (machine) {
-      this.status = `not available on ${machine} yet`;
-      this.items.push({ kind: "error", text: `Chat only runs on this computer for now. ${machine} gets its own engine in milestone 1.` });
-      return cx.notify();
-    }
-    try {
-      await fs.mkdir(`${appHome()}/${DATA}`, { recursive: true });
-      this.ws = await WebSocket.connect(URL);
-      this.status = "connected";
-      const cwd = props()?.cwd ?? focused()?.cwd ?? "/tmp";
-      await this.ws.write(JSON.stringify({ type: "start", cwd }));
-      const p = props() ?? {};
-      if (p.testEcho) await this.ws.write(JSON.stringify({ type: "echo_image", path: p.testEcho }));
-      if (p.testPaste) await this.pasteImage(cx);
-      if (p.testPrompt) { this.input.set_value(p.testPrompt); this.submit(cx); }
-      cx.notify();
-      for (;;) {
-        const raw = await this.ws.read();
-        try {
-          if (typeof raw !== "string") await this.gotBinary(raw);
-          else this.handle(JSON.parse(raw));
-        } catch (e) {
-          this.items.push({ kind: "error", text: `event: ${e}` });
-        }
+    await fs.mkdir(`${appHome()}/${DATA}/img`, { recursive: true }).catch(() => {});
+    let delay = 1000;
+    for (;;) {
+      try {
+        const { url, token } = await this.endpoint();
+        this.ws = await WebSocket.connect(url);
+        await this.ws.write(JSON.stringify({ type: "hello", v: PROTOCOL, token }));
+        await this.ws.write(JSON.stringify({ type: "open", key: this.key, cwd: this.cwd }));
+        this.conn = "connected";
+        this.error = null;
+        delay = 1000;
         cx.notify();
+        for (;;) {
+          const raw = await this.ws.read();
+          if (typeof raw !== "string") continue;
+          await this.receive(JSON.parse(raw), cx);
+          cx.notify();
+        }
+      } catch (e) {
+        this.error = String(e?.message ?? e);
       }
-    } catch (e) {
-      this.status = `error: ${e}`;
+      this.ws = null;
+      this.conn = "offline";
       cx.notify();
+      await new Promise((r) => cx.timer.after(delay, () => r(null)));
+      delay = Math.min(delay * 2, 15000);
     }
   }
 
-  async gotBinary(bytes) {
-    const rel = `${DATA}/echo-${Date.now()}.png`;
-    await fs.writeFile(`${appHome()}/${rel}`, bytes);
-    this.items.push({ kind: "image", path: rel, note: `binary over ws: ${bytes.length} bytes` });
+  send(o) {
+    this.ws?.write(JSON.stringify(o)).catch(() => {});
   }
 
-  handle(m) {
-    if (m.type === "permission_request") {
-      this.items.push({ kind: "permission", ...m, answered: null });
-    } else if (m.type === "error") {
-      this.items.push({ kind: "error", text: m.message });
-    } else if (m.type === "sdk") {
-      this.sdk(m.msg);
-    }
-    if (this.items.length) this.scroll.scroll_to_item(this.items.length - 1);
+  async receive(m, cx) {
+    if (m.type === "hello" && m.v !== PROTOCOL) this.error = `engine speaks protocol ${m.v}, this pane ${PROTOCOL}`;
+    else if (m.type === "error") this.error = m.message;
+    else if (m.type === "state") this.setState(m.state);
+    else if (m.type === "snapshot") {
+      this.items = [];
+      this.byId.clear();
+      for (const item of m.items) await this.upsert(item, false);
+      this.setState(m.state);
+      this.stick = true;
+    } else if (m.type === "upsert") await this.upsert(m.item, true);
   }
 
-  sdk(msg) {
-    if (msg.type === "system" && msg.subtype === "init") {
-      this.model = msg.model;
-    } else if (msg.type === "stream_event") {
-      const ev = msg.event;
-      if (ev.type === "content_block_start") {
-        const b = ev.content_block;
-        const item = b.type === "text" ? { kind: "text", text: "" }
-          : b.type === "thinking" ? { kind: "thinking", text: "" }
-          : b.type === "tool_use" ? { kind: "tool", name: b.name, id: b.id, input: "" }
-          : null;
-        if (item) { this.items.push(item); this.blocks[ev.index] = item; }
-      } else if (ev.type === "content_block_delta") {
-        const item = this.blocks[ev.index];
-        const d = ev.delta;
-        if (!item) return;
-        if (d.type === "text_delta") item.text += d.text;
-        else if (d.type === "thinking_delta") item.text += d.thinking;
-        else if (d.type === "input_json_delta") item.input += d.partial_json;
-      } else if (ev.type === "message_start") {
-        this.blocks = {};
-      }
-    } else if (msg.type === "user") {
-      for (const c of msg.message?.content ?? []) {
-        if (c.type !== "tool_result") continue;
-        const tool = this.items.find((i) => i.kind === "tool" && i.id === c.tool_use_id);
-        if (tool) tool.done = !c.is_error ? "ok" : "failed";
-      }
-    } else if (msg.type === "result") {
-      this.busy = false;
-      this.items.push({ kind: "result", text: `${msg.subtype} · ${(msg.duration_ms / 1000).toFixed(1)}s · ${msg.num_turns} turns` });
+  setState(next) {
+    const was = this.state.busy;
+    this.state = next;
+    if (was && !next.busy && !this.visible()) {
+      notify({ title: "Claude finished", body: tilde(this.cwd, home()), level: "success", action: this.focusAction() });
     }
+  }
+
+  async upsert(item, live) {
+    const prev = this.byId.get(item.id);
+    if (prev) this.items[this.items.indexOf(prev)] = item;
+    else this.items.push(item);
+    this.byId.set(item.id, item);
+    const t = theme();
+    if (item.kind === "text") this.codes.prepareText(item.id, item.text, t);
+    if (item.kind === "permission") {
+      if (item.detail) this.codes.prepare(`detail:${item.id}`, this.detailLang(item.tool), item.detail, t);
+      if (item.plan) this.codes.prepareText(item.id, item.plan, t);
+    }
+    if (item.kind === "question" && item.state === "pending" && !this.otherInputs.has(item.id)) this.prepareQuestion(item);
+    if (item.kind === "tool" && this.expanded.has(item.id) && item.detail) this.codes.prepare(`detail:${item.id}`, this.detailLang(item.name), item.detail, t);
+    if (item.images?.length) await this.saveImages(item);
+    if (live && !prev && (item.kind === "permission" || item.kind === "question") && item.state === "pending") this.alert(item);
+    if (this.following) this.stick = true;
+  }
+
+  detailLang(tool) {
+    return tool === "Bash" ? "bash" : ["Edit", "MultiEdit", "Write"].includes(tool) ? "diff" : "";
+  }
+
+  prepareQuestion(item) {
+    const inputs = item.questions.map((q) => {
+      const s = InputState.new({ placeholder: "Something else…" });
+      s.on("submit", (_e, cx) => {
+        if (item.questions.length === 1 && !q.multiSelect && s.value().trim()) this.answer({ item: item.id, answers: { [q.question]: s.value().trim() } }, cx);
+        else this.submitQuestion(item, cx);
+      });
+      return s;
+    });
+    this.otherInputs.set(item.id, inputs);
+  }
+
+  async saveImages(item) {
+    for (const [i, img] of item.images.entries()) {
+      const key = `${item.id}:${i}`;
+      if (this.images.has(key)) continue;
+      const rel = `${DATA}/img/${safe(item.id)}-${i}.${IMAGE_EXT[img.type] ?? "png"}`;
+      try {
+        await fs.writeFile(`${appHome()}/${rel}`, Buffer.from(img.data, "base64"));
+        this.images.set(key, rel);
+      } catch {}
+    }
+  }
+
+  imagePath(id, i) {
+    return this.images.get(`${id}:${i}`) ?? null;
+  }
+
+  visible() {
+    return Boolean(this.pane) && focused()?.pane === this.pane;
+  }
+
+  focusAction() {
+    return this.pane ? { name: "pane.focus", args: { pane: this.pane } } : undefined;
+  }
+
+  alert(item) {
+    if (this.visible()) return;
+    const body = item.kind === "question" ? item.questions[0]?.question ?? "" : `${item.tool}${item.meta ? ` · ${item.meta}` : ""}`;
+    notify({ title: item.kind === "question" ? "Claude has a question" : "Claude needs permission", body, level: "warning", action: this.focusAction() });
+  }
+
+  pending() {
+    return this.items.find((i) => (i.kind === "permission" || i.kind === "question") && i.state === "pending") ?? null;
+  }
+
+  hasDraft() {
+    return Boolean(this.input.value().trim() || this.attachments.length);
+  }
+
+  // Enter arrives as a submit after the textarea has inserted its newline; Shift-Enter keeps it.
+  enter(e, cx) {
+    if (e?.shift) return;
+    const v = this.input.value();
+    const at = this.input.selected_range().start;
+    if (v[at - 1] === "\n") this.input.set_value(v.slice(0, at - 1) + v.slice(at));
+    this.submit(cx);
+  }
+
+  submit(cx) {
+    const text = this.input.value().trim();
+    if (!this.ws || (!text && !this.attachments.length)) return;
+    const waiting = this.pending();
+    if (waiting && text && !this.attachments.length) {
+      if (waiting.kind === "permission") this.answer({ item: waiting.id, decision: "deny", message: text }, cx);
+      else this.answer({ item: waiting.id, answers: null, message: `The user replied instead of picking: ${text}` }, cx);
+    }
+    this.send({ type: "prompt", text, images: this.attachments.map(({ type, data }) => ({ type, data })) });
+    this.input.set_value("");
+    this.attachments = [];
+    this.following = true;
+    this.stick = true;
+    cx.notify();
+  }
+
+  answer(a, cx) {
+    this.send({ type: "answer", ...a });
+    cx.notify();
+  }
+
+  pick(item, q, label, single, cx) {
+    if (single) return this.answer({ item: item.id, answers: { [q.question]: label } }, cx);
+    const picks = this.picks.get(item.id) ?? {};
+    const set = picks[q.question] ?? new Set();
+    if (q.multiSelect) set.has(label) ? set.delete(label) : set.add(label);
+    else { set.clear(); set.add(label); }
+    picks[q.question] = set;
+    this.picks.set(item.id, picks);
+    cx.notify();
+  }
+
+  submitQuestion(item, cx) {
+    const picks = this.picks.get(item.id) ?? {};
+    const inputs = this.otherInputs.get(item.id) ?? [];
+    const answers = {};
+    item.questions.forEach((q, i) => {
+      const parts = [...(picks[q.question] ?? [])];
+      const other = inputs[i]?.value().trim();
+      if (other) parts.push(other);
+      if (parts.length) answers[q.question] = parts.join(", ");
+    });
+    if (Object.keys(answers).length < item.questions.length) return;
+    this.answer({ item: item.id, answers }, cx);
+  }
+
+  interrupt(cx) {
+    this.send({ type: "interrupt" });
+    cx.notify();
+  }
+
+  unqueue(id, cx) {
+    this.send({ type: "unqueue", id });
+    cx.notify();
+  }
+
+  cycleMode(cx) {
+    const next = CYCLE[(CYCLE.indexOf(this.state.mode) + 1) % CYCLE.length];
+    this.send({ type: "set", mode: next });
+    this.state = { ...this.state, mode: next };
+    cx.notify();
+  }
+
+  toggle(id, cx) {
+    if (this.expanded.has(id)) this.expanded.delete(id);
+    else {
+      this.expanded.add(id);
+      const item = this.byId.get(id);
+      if (item?.kind === "tool" && item.detail) this.codes.prepare(`detail:${id}`, this.detailLang(item.name), item.detail, theme());
+    }
+    cx.notify();
   }
 
   async pasteImage(cx) {
-    const rel = `${DATA}/paste-${Date.now()}.png`;
+    const rel = `${DATA}/img/paste-${Date.now()}.png`;
     const abs = `${appHome()}/${rel}`;
     const r = await exec("osascript", [
       "-e", "set png_data to (the clipboard as «class PNGf»)",
@@ -118,97 +305,113 @@ export default class HerdrChat extends View {
       "-e", "write png_data to fp",
       "-e", "close access fp",
     ]);
-    if (r.code === 0) this.attachments.push(rel);
-    else this.items.push({ kind: "error", text: `paste failed: ${r.stderr}` });
+    if (r.code !== 0) return;
+    const data = Buffer.from(await fs.readFile(abs)).toString("base64");
+    this.attachments.push({ type: "image/png", data, path: rel });
     cx.notify();
   }
 
-  submit(cx) {
-    const text = this.input.value().trim();
-    if (!this.ws || (!text && !this.attachments.length)) return;
-    if (text.startsWith("/echo ")) {
-      this.ws.write(JSON.stringify({ type: "echo_image", path: text.slice(6).trim() }));
-      this.input.set_value("");
-      return;
+  async drop(paths, cx) {
+    for (const path of paths) {
+      const ext = path.split(".").pop()?.toLowerCase() ?? "";
+      if (!MIME[ext]) {
+        this.input.replace(`${path} `);
+        continue;
+      }
+      try {
+        const bytes = await fs.readFile(path);
+        const rel = `${DATA}/img/drop-${Date.now()}.${ext}`;
+        await fs.writeFile(`${appHome()}/${rel}`, bytes);
+        this.attachments.push({ type: MIME[ext], data: Buffer.from(bytes).toString("base64"), path: rel });
+      } catch {}
     }
-    const atts = this.attachments;
-    this.attachments = [];
-    this.input.set_value("");
-    this.items.push({ kind: "user", text, images: atts });
-    this.busy = true;
-    cx.spawn(async (cx) => {
-      const images = [];
-      for (const rel of atts) images.push(Buffer.from(await fs.readFile(`${appHome()}/${rel}`)).toString("base64"));
-      await this.ws.write(JSON.stringify({ type: "prompt", text, images }));
-      cx.notify();
-    });
     cx.notify();
   }
 
-  answer(item, allow, cx) {
-    item.answered = allow ? "allowed" : "denied";
-    this.ws.write(JSON.stringify({ type: "permission", id: item.id, allow, input: item.input }));
+  removeAttachment(i, cx) {
+    this.attachments.splice(i, 1);
     cx.notify();
   }
 
-  renderItem(item, i, t) {
-    const row = () => v_flex().w_full().px(20).py(6);
+  key(e, cx) {
+    if (e.keystroke === "escape" && this.state.busy) this.interrupt(cx);
+    else if (e.keystroke === "shift-tab") this.cycleMode(cx);
+    else return;
+    cx.stop_propagation();
+  }
+
+  wheel(e, cx) {
+    if (e.delta.y > 0 && this.following) { this.following = false; cx.notify(); }
+  }
+
+  jump(cx) {
+    this.following = true;
+    this.stick = true;
+    cx.notify();
+  }
+
+  renderItem(item, t, children) {
     switch (item.kind) {
-      case "user":
-        return row().items_end().child(
-          v_flex().max_w(560).gap(6).px(14).py(10).rounded(14).bg(t.raised)
-            .children(item.images.map((p) => image(p).w(180).rounded(8)))
-            .child(div().text_size(14).child(item.text)));
-      case "text":
-        return row().child(TextView.markdown(`md-${i}`, item.text || " ").selectable(true).text_size(14));
-      case "thinking":
-        return row().child(div().text_size(12.5).text_color(t.dim).italic().child(`Thinking · ${item.text.length} chars`));
-      case "tool": {
-        let input = {};
-        try { input = JSON.parse(item.input || "{}"); } catch {}
-        const meta = input.description ?? input.command ?? input.file_path ?? input.pattern ?? "";
-        const dot = item.done === "failed" ? t.blocked : item.done ? t.done : t.working;
-        return row().child(h_flex().gap(8).items_center().text_size(13)
-          .child(div().size(7).rounded(4).bg(dot))
-          .child(div().font_semibold().child(item.name))
-          .child(div().text_color(t.muted).truncate().child(String(meta))));
-      }
-      case "permission": {
-        const btn = (id, label, primary, fn) => div().id(`${id}-${i}`).px(12).py(6).rounded(8).cursor_pointer()
-          .bg(primary ? t.solid : t.raised).text_color(primary ? t.solid_foreground : t.foreground)
-          .text_size(12.5).hover((s) => s.opacity(0.88)).on_click(fn).child(label);
-        return row().child(v_flex().gap(10).p(14).rounded(12).border_1().border_color(t.accent).bg(t.surface)
-          .child(div().text_size(13.5).font_semibold().child(`Allow Claude to use ${item.toolName}?`))
-          .child(div().text_size(12).text_color(t.muted).child(JSON.stringify(item.input).slice(0, 400)))
-          .child(item.answered
-            ? div().text_size(12).text_color(t.dim).child(item.answered)
-            : h_flex().gap(8)
-              .child(btn("allow", "Allow", true, (_e, cx) => this.answer(item, true, cx)))
-              .child(btn("deny", "Deny", false, (_e, cx) => this.answer(item, false, cx)))));
-      }
-      case "image":
-        return row().child(v_flex().gap(4).child(image(item.path).w(240).rounded(8))
-          .child(div().text_size(11).text_color(t.dim).child(item.note)));
-      case "result":
-        return row().child(div().text_size(11).text_color(t.dim).child(item.text));
-      case "error":
-        return row().child(div().text_size(12.5).text_color(t.blocked).child(item.text));
+      case "user": return userRow(item, t, this);
+      case "text": return textRow(item, t, this);
+      case "thinking": return thinkingRow(item, t, this);
+      case "tool": return toolRow(item, t, this, children.get(item.id) ?? []);
+      case "permission": return permissionCard(item, t, this);
+      case "question": return questionCard(item, t, this);
+      case "notice": return noticeRow(item, t);
+      case "turn_end": return endRow(item, t);
     }
     return div();
   }
 
+  header(t) {
+    const s = this.state;
+    const status = this.conn !== "connected"
+      ? div().text_color(this.conn === "offline" ? t.blocked : t.dim).truncate()
+        .child(this.conn === "offline" ? `Offline${this.error ? `: ${this.error}` : ""} · retrying` : "Connecting…")
+      : s.busy
+        ? h_flex().gap(6).items_center().text_color(t.working)
+          .child(div().frames(["◐", "◓", "◑", "◒"], 120))
+          .child(div().child(s.status ?? "Working"))
+        : div();
+    return h_flex().h(34).px(16).gap(10).items_center().flex_none().border_b_1().border_color(t.border).text_size(12)
+      .child(div().font_semibold().text_color(t.foreground).child("Claude"))
+      .child(div().flex_1().min_w(0).truncate().text_color(t.dim)
+        .child(`${this.machine ? `${this.machine} · ` : ""}${tilde(this.cwd, this.machine ? null : home())}`))
+      .child(status);
+  }
+
+  empty(t) {
+    return v_flex().flex_1().items_center().justify_center().gap(8)
+      .child(div().text_size(20).text_color(t.foreground).child("What should we work on?"))
+      .child(div().text_size(12.5).text_color(t.dim).child(tilde(this.cwd, this.machine ? null : home()) || ""));
+  }
+
   render() {
     const t = theme();
-    return v_flex().id("root").size_full().bg(t.background).text_color(t.foreground)
-      .child(h_flex().px(16).h(32).items_center().gap(8).border_b_1().border_color(t.border).text_size(12).text_color(t.muted)
-        .child(div().child("Claude"))
-        .child(div().text_color(t.dim).child(this.model ?? this.status))
-        .when(Boolean(this.busy), (el) => el.child(div().text_color(t.working).frames(["·  ", "·· ", "···", " ··", "  ·", "   "], 140))))
-      .child(v_flex().id("transcript").flex_1().min_h(0).overflow_y_scrollbar().track_scroll(this.scroll).py(10)
-        .children(this.items.map((it, i) => this.renderItem(it, i, t))))
-      .child(v_flex().p(12).gap(8).border_t_1().border_color(t.border)
-        .when(this.attachments.length > 0, (el) => el.child(h_flex().gap(6)
-          .children(this.attachments.map((p) => image(p).h(56).rounded(6)))))
-        .child(Textarea.new(this.input).w_full().px(12).py(8).rounded(10).border_1().border_color(t.input).bg(t.surface).text_size(14)));
+    const children = new Map();
+    for (const i of this.items) if (i.kind === "tool" && i.parent) children.set(i.parent, [...(children.get(i.parent) ?? []), i]);
+    const shown = this.items.filter((i) => !(i.kind === "tool" && i.parent && this.byId.has(i.parent)));
+    if (this.stick && shown.length) {
+      this.scroll.scroll_to_item(shown.length);
+      this.stick = false;
+    }
+    const transcript = v_flex().id("transcript").flex_1().min_h(0).overflow_y_scrollbar().track_scroll(this.scroll).pt(10)
+      .on_scroll_wheel((e, cx) => this.wheel(e, cx))
+      .items_center()
+      .children(shown.map((i) => this.renderItem(i, t, children).max_w(880)))
+      .child(div().h(8));
+    return v_flex().id("root").track_focus(this.handle).size_full().bg(t.background).text_color(t.foreground)
+      .on_key_down((e, cx) => this.key(e, cx))
+      .on_drop((e, cx) => cx.spawn(async (cx) => this.drop(e.paths, cx)))
+      .on_click((_e, cx) => { this.findPane(); cx.notify(); })
+      .child(this.header(t))
+      .child(shown.length ? div().relative().flex_1().min_h(0).flex().flex_col()
+        .child(transcript)
+        .when(!this.following, (el) => el.child(div().absolute().bottom(10).w_full().flex().justify_center()
+          .child(div().id("jump").px(12).py(5).rounded(14).bg(t.raised).border_1().border_color(t.border)
+            .text_size(12).cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.jump(cx)).child("↓ Latest"))))
+        : this.empty(t))
+      .child(h_flex().w_full().justify_center().flex_none().child(composer(this, t)));
   }
 }
