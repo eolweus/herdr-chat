@@ -19,6 +19,10 @@ const IMAGE_EXT = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif",
 const MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
 const CYCLE = ["default", "acceptEdits", "plan", "auto"];
 
+const ago = (ms) => {
+  const m = Math.round((Date.now() - ms) / 60000);
+  return m < 1 ? "now" : m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`;
+};
 const safe = (s) => s.replace(/[^A-Za-z0-9_-]/g, "_");
 const tilde = (path, h) => (h && path?.startsWith(h) ? `~${path.slice(h.length)}` : path ?? "");
 
@@ -228,7 +232,10 @@ export default class HerdrChat extends View {
       for (const item of m.items) await this.upsert(item, false);
       this.setState(m.state);
       this.stick = true;
-    } else if (m.type === "upsert") await this.upsert(m.item, true);
+      this.recent = null;
+      if (!this.items.length) this.send({ type: "sessions" });
+    } else if (m.type === "sessions") this.recent = m.sessions;
+    else if (m.type === "upsert") await this.upsert(m.item, true);
   }
 
   setState(next) {
@@ -521,9 +528,31 @@ export default class HerdrChat extends View {
   }
 
   empty(t) {
-    return v_flex().flex_1().items_center().justify_center().gap(8)
+    const recent = (this.recent ?? []).slice(0, 6);
+    return v_flex().flex_1().items_center().justify_center().gap(8).px(24)
       .child(div().text_size(20).text_color(t.foreground).child("What should we work on?"))
-      .child(div().text_size(12.5).text_color(t.dim).child(tilde(this.cwd, this.home) || ""));
+      .child(div().text_size(12.5).text_color(t.dim).child(tilde(this.cwd, this.home) || ""))
+      .when(recent.length > 0, (el) => el.child(v_flex().mt(28).w_full().max_w(560).gap(2)
+        .child(div().px(10).pb(4).text_size(11.5).text_color(t.dim).child("Pick up where you left off"))
+        .children(recent.map((r) => h_flex().id(`resume-${r.id}`).gap(10).px(10).py(7).rounded(8).items_center().cursor_pointer()
+          .hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.resume(r.id, cx))
+          .child(div().flex_1().min_w(0).truncate().text_size(13).text_color(t.foreground).child(r.title))
+          .when(Boolean(r.branch) && r.branch !== "HEAD", (el) => el.child(div().flex_none().text_size(11.5).text_color(t.dim).child(r.branch)))
+          .child(div().flex_none().w(64).text_right().text_size(11.5).text_color(t.dim).child(ago(r.when)))))));
+  }
+
+  resume(id, cx) {
+    this.send({ type: "resume", id });
+    this.recent = null;
+    cx.notify();
+  }
+
+  async attach(cx) {
+    const r = await exec("osascript", ["-e", 'set fs to choose file with prompt "Attach to Claude" with multiple selections allowed', "-e",
+      'set out to ""', "-e", "repeat with f in fs", "-e", 'set out to out & POSIX path of f & linefeed', "-e", "end repeat", "-e", "out"]);
+    if (r.code !== 0) return;
+    await this.drop(r.stdout.split("\n").filter(Boolean), cx);
+    this.input.focus();
   }
 
   render() {
