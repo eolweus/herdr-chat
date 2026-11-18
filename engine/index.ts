@@ -103,6 +103,13 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
     case "interrupt": return s.interrupt();
     case "answer": return s.answer(m as any);
     case "set": return s.set(m);
+    case "mcp_auth": {
+      const server = String(m.server);
+      const url = await s.signIn(server).catch((e) => { ws.send(JSON.stringify({ type: "error", message: `Sign-in to ${server} failed: ${e?.message ?? e}` })); return undefined; });
+      if (url !== undefined) ws.send(JSON.stringify({ type: "auth", server, url }));
+      return;
+    }
+    case "mcp_callback": return s.signInCallback(String(m.server), String(m.url)).catch(() => {});
   }
 }
 

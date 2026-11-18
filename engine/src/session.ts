@@ -190,11 +190,12 @@ export class Session {
     }
     const before = this.state.session;
     this.n.feed(msg);
-    if (msg.type === "system" && msg.subtype === "init") this.loadCommands();
+    if (msg.type === "system" && msg.subtype === "init") { this.loadCommands(); this.mcp(); }
     if (msg.type === "system" && msg.subtype === "commands_changed") knownCommands = this.state.commands;
     if (this.state.session !== before) this.onSession(this);
     if (msg.type === "result") {
       this.usage();
+      this.mcp();
       const next = this.queued.shift();
       if (next) { this.send(next); this.changed(); }
     }
@@ -211,6 +212,47 @@ export class Session {
       this.n.setState({ commands: knownCommands, models: knownModels });
       this.schedule();
     } catch {}
+  }
+
+  protected async mcp() {
+    const list = await this.q?.mcpServerStatus().catch(() => null);
+    if (!list) return;
+    this.n.setState({ mcp: list.filter((m) => m.status === "needs-auth").map((m) => ({ name: m.name, label: m.name.split(":").pop()! })) });
+    this.schedule();
+  }
+
+  async signIn(server: string): Promise<string | null> {
+    if (!this.q) this.start();
+    await this.q!.initializationResult();
+    const r = await (this.q as any).mcpAuthenticate(server);
+    this.watchSignIn(server);
+    return r?.authUrl ?? null;
+  }
+
+  async signInCallback(server: string, url: string) {
+    await (this.q as any)?.mcpSubmitOAuthCallbackUrl(server, url);
+  }
+
+  private watching = new Set<string>();
+
+  private async watchSignIn(server: string) {
+    if (this.watching.has(server)) return;
+    this.watching.add(server);
+    try {
+      await this.waitSignIn(server);
+    } finally {
+      this.watching.delete(server);
+    }
+  }
+
+  private async waitSignIn(server: string) {
+    for (let i = 0; i < 150 && this.q; i++) {
+      await Bun.sleep(2000);
+      const s = (await this.q?.mcpServerStatus().catch(() => null))?.find((m) => m.name === server);
+      if (s?.status !== "connected") continue;
+      this.n.notice("info", `Signed in to ${server.split(":").pop()}`);
+      return this.mcp();
+    }
   }
 
   protected async usage() {

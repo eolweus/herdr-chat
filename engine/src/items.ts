@@ -61,7 +61,10 @@ export type State = {
   usage: Usage | null;
   commands: Command[];
   models: Model[];
+  mcp: Mcp[];
 };
+
+export type Mcp = { name: string; label: string };
 
 export type Model = { value: string; name: string; description: string };
 
