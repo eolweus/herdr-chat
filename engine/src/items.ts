@@ -60,7 +60,10 @@ export type State = {
   session: string | null;
   usage: Usage | null;
   commands: Command[];
+  models: Model[];
 };
+
+export type Model = { value: string; name: string; description: string };
 
 export type Command = { name: string; description: string; hint: string };
 

@@ -20,6 +20,11 @@ export class ReplaySession extends Session {
       { name: "model", description: "Set the AI model", hint: "<model>" },
       { name: "commit", description: "Create a git commit", hint: "" },
     ];
+    this.n.state.models = [
+      { value: "default", name: "Default (recommended)", description: "Opus 5.5 for complex work" },
+      { value: "sonnet", name: "Sonnet", description: "Sonnet 5.5 for daily coding" },
+      { value: "haiku", name: "Haiku", description: "Haiku 5.5 for quick answers" },
+    ];
     await super.load();
   }
 

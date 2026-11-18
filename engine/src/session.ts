@@ -23,6 +23,7 @@ type Pending = {
 
 const FLUSH_MS = 50;
 let knownCommands: State["commands"] = [];
+let knownModels: State["models"] = [];
 
 function defaultMode(): string {
   try {
@@ -67,6 +68,7 @@ export class Session {
     this.n = new Normalizer(cwd);
     this.n.state.session = sessionId;
     this.n.state.commands = knownCommands;
+    this.n.state.models = knownModels;
     this.n.state.mode = defaultMode();
   }
 
@@ -204,7 +206,9 @@ export class Session {
       const list = await this.q?.supportedCommands();
       if (!list) return;
       knownCommands = commandsOf(list);
-      this.n.setState({ commands: knownCommands });
+      const models = await this.q?.supportedModels().catch(() => null);
+      if (models) knownModels = models.map((m) => ({ value: m.value, name: m.displayName, description: m.description }));
+      this.n.setState({ commands: knownCommands, models: knownModels });
       this.schedule();
     } catch {}
   }
