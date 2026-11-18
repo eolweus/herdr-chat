@@ -15,6 +15,18 @@ spaces on this Mac and on munin.
 
 Still unproven: the permission-card click path, Enter-to-send in `Textarea`, and scroll performance in long sessions.
 
+## Status (2026-11-18)
+
+Milestone 1 is built and running as services on the Mac (launchd) and munin (systemd), plus
+parts of milestone 2: grouped tool lines with screenshot thumbnails and a photo viewer, a side
+panel (environment, context by category, outputs) toggled from the tab bar, a slash command
+picker, a model picker, recent sessions to resume, and tab naming. Not yet checked by hand:
+Enter/Shift-Enter in the composer, image paste, Esc to interrupt.
+
+UI work runs against replay engines: `HERDR_CHAT_PORT=7778 bun run index.ts --replay
+test/fixtures/rich.jsonl`, then a pane with props `{engine: "ws://127.0.0.1:7778"}` (test props:
+`expand`, `draft`, `models`).
+
 ## Architecture
 
 ```
