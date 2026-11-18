@@ -1,6 +1,6 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, TextareaState, InputState, ScrollHandle } from "gpui-base";
-import { appHome, checking, exec, focused, home, nextCommand, notify, openOverlay, panes, props, readTextFile, settings, setShared, shared, theme } from "herdr";
+import { appHome, checking, exec, focused, home, nextCommand, notify, openOverlay, panes, props, readTextFile, run, settings, setShared, shared, spaces, theme } from "herdr";
 import { WebSocket } from "websocket";
 import * as fs from "fs/promises";
 import { Buffer } from "buffer";
@@ -50,9 +50,11 @@ export default class HerdrChat extends View {
     this.scroll = ScrollHandle.new();
     this.input = TextareaState.new({ placeholder: "Ask Claude…" });
     this.input.set_auto_grow(1, 12);
+    if (p.draft) this.setDraft(p.draft);
     this.input.on("submit", (e, cx) => this.enter(e, cx));
     this.input.on("paste_other", (_e, cx) => this.pasteImage(cx));
-    this.input.on("change", (_e, cx) => cx.notify());
+    this.input.on("change", (_e, cx) => { this.commandAt = 0; cx.notify(); });
+    this.commandAt = 0;
     this.input.on("focus", (_e, cx) => { this.focusedInput = true; this.findPane(); this.publish(true); cx.notify(); });
     this.input.on("blur", (_e, cx) => { this.focusedInput = false; cx.notify(); });
     this.handle = cx.focus_handle();
@@ -136,6 +138,29 @@ export default class HerdrChat extends View {
   findPane() {
     const f = focused()?.pane;
     if (f && panes().find((x) => x.pane === f)?.mod === "herdr-chat") this.pane = f;
+    if (this.visible()) this.unseen = false;
+    this.publishPane();
+  }
+
+  // Herdr's pane header can't see into a mod pane, so the header clone reads this.
+  publishPane() {
+    if (!this.pane || this.other) return;
+    const status = this.pending() ? "blocked" : this.state.busy ? "working" : this.unseen ? "done" : null;
+    const json = JSON.stringify({ folder: tilde(this.cwd, this.home), status });
+    if (json === this.paneShared) return;
+    this.paneShared = json;
+    setShared(`herdr-chat:pane:${this.pane}`, JSON.parse(json));
+  }
+
+  // Names an unnamed tab that holds only this chat after its first message, like the desktop app's titles.
+  nameTab(text) {
+    if (this.named || !this.pane || !text) return;
+    this.named = true;
+    const me = panes().find((x) => x.pane === this.pane);
+    const tab = spaces().flatMap((sp) => sp.tabs).find((tb) => tb.id === me?.tab);
+    if (!tab || tab.named || tab.panes !== 1) return;
+    const name = text.split("\n")[0].trim();
+    run("tab.rename", { id: tab.id, name: name.length > 40 ? `${name.slice(0, 39)}…` : name });
   }
 
   async endpoint() {
@@ -208,7 +233,9 @@ export default class HerdrChat extends View {
   setState(next) {
     const was = this.state.busy;
     this.state = next;
+    if (was && !next.busy && !this.visible()) this.unseen = true;
     this.publish(false);
+    this.publishPane();
     if (was && !next.busy && !this.visible()) {
       notify({ title: "Claude finished", body: tilde(this.cwd, this.home), level: "success", action: this.focusAction() });
     }
@@ -229,6 +256,8 @@ export default class HerdrChat extends View {
     if (item.kind === "tool" && this.expanded.has(item.id) && item.detail) this.codes.prepare(`detail:${item.id}`, this.detailLang(item.name), item.detail, t);
     if (item.images?.length) await this.saveImages(item);
     if (live && !prev && (item.kind === "permission" || item.kind === "question") && item.state === "pending") this.alert(item);
+    if (item.kind === "permission" || item.kind === "question") this.publishPane();
+    if (item.kind === "user" && !prev && this.items.filter((i) => i.kind === "user").length === 1) this.nameTab(item.text);
     if (this.following) this.stick = true;
     if (live && item.kind === "tool" && item.status === "ok" && item.path) this.publish(false);
   }
@@ -293,7 +322,30 @@ export default class HerdrChat extends View {
     const v = this.input.value();
     const at = this.input.selected_range().start;
     if (v[at - 1] === "\n") this.input.set_value(v.slice(0, at - 1) + v.slice(at));
+    const pick = this.commandMatches()[this.commandAt];
+    if (pick && !this.input.value().trim().includes(" ") && this.input.value().trim() !== `/${pick.name}`) return this.complete(pick, cx);
     this.submit(cx);
+  }
+
+  commandMatches() {
+    const v = this.input.value();
+    if (!v.startsWith("/") || /\s/.test(v.trimEnd()) || v.includes("\n")) return [];
+    const q = v.slice(1).trim().toLowerCase();
+    const list = this.state.commands ?? [];
+    const starts = list.filter((c) => c.name.toLowerCase().startsWith(q));
+    const contains = list.filter((c) => !c.name.toLowerCase().startsWith(q) && (c.name + " " + c.description).toLowerCase().includes(q));
+    return [...starts, ...contains].slice(0, 8);
+  }
+
+  setDraft(text) {
+    this.input.set_value(text);
+    this.input.set_selected_range({ start: text.length, end: text.length });
+  }
+
+  complete(cmd, cx) {
+    this.setDraft(`/${cmd.name} `);
+    this.commandAt = 0;
+    cx.notify();
   }
 
   submit(cx) {
@@ -340,6 +392,22 @@ export default class HerdrChat extends View {
     });
     if (Object.keys(answers).length < item.questions.length) return;
     this.answer({ item: item.id, answers }, cx);
+  }
+
+  replyFor(endId) {
+    const end = this.items.findIndex((i) => i.id === endId);
+    const texts = [];
+    for (let i = end - 1; i >= 0 && this.items[i].kind !== "user" && this.items[i].kind !== "turn_end"; i--) {
+      if (this.items[i].kind === "text") texts.unshift(this.items[i].text);
+    }
+    return texts.join("\n\n");
+  }
+
+  copyReply(endId, cx) {
+    cx.write_to_clipboard(this.replyFor(endId));
+    this.copied = endId;
+    cx.notify();
+    cx.timer.after(1500, (cx) => { if (this.copied === endId) this.copied = null; cx.notify(); });
   }
 
   interrupt(cx) {
@@ -407,7 +475,13 @@ export default class HerdrChat extends View {
   }
 
   key(e, cx) {
-    if (e.keystroke === "escape" && this.state.busy) this.interrupt(cx);
+    const cmds = this.commandMatches();
+    if (cmds.length && (e.keystroke === "up" || e.keystroke === "down")) {
+      this.commandAt = (this.commandAt + (e.keystroke === "down" ? 1 : cmds.length - 1)) % cmds.length;
+      cx.notify();
+    } else if (cmds.length && e.keystroke === "tab") this.complete(cmds[this.commandAt] ?? cmds[0], cx);
+    else if (cmds.length && e.keystroke === "escape") { this.input.set_value(""); cx.notify(); }
+    else if (e.keystroke === "escape" && this.state.busy) this.interrupt(cx);
     else if (e.keystroke === "shift-tab") this.cycleMode(cx);
     else return;
     cx.stop_propagation();
@@ -432,7 +506,7 @@ export default class HerdrChat extends View {
       case "permission": return permissionCard(item, t, this);
       case "question": return questionCard(item, t, this);
       case "notice": return noticeRow(item, t);
-      case "turn_end": return endRow(item, t);
+      case "turn_end": return endRow(item, t, this);
       case "group": return groupRow(item, t, this, children);
     }
     return div();

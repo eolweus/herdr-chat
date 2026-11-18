@@ -33,6 +33,7 @@ export function composer(view, t) {
         .child(div().flex_1().min_w(0).truncate().child(q.text || `${q.images} image${q.images === 1 ? "" : "s"}`))
         .child(div().id(`unq-${q.id}`).px(4).cursor_pointer().text_color(t.dim).hover((s) => s.text_color(t.foreground))
           .on_click((_e, cx) => view.unqueue(q.id, cx)).child("✕"))))))
+    .when(view.commandMatches().length > 0, (el) => el.child(commandList(view, t)))
     .child(v_flex().w_full().rounded(14).border_1().border_color(view.focusedInput ? t.accent : t.input).bg(t.surface)
       .when(view.attachments.length > 0, (el) => el.child(h_flex().gap(8).px(10).pt(10).flex_wrap()
         .children(view.attachments.map((a, i) => div().relative()
@@ -57,4 +58,16 @@ export function composer(view, t) {
         .child(div().frames(["◐", "◓", "◑", "◒"], 120))
         .child(div().child(s.status ?? "Working"))))
       .child(meter(s, t)));
+}
+
+function commandList(view, t) {
+  const cmds = view.commandMatches();
+  return v_flex().w_full().p(4).rounded(12).border_1().border_color(t.border).bg(t.surface)
+    .children(cmds.map((c, i) => h_flex().id(`cmd-${c.name}`).gap(10).px(10).py(6).rounded(8).items_baseline().cursor_pointer()
+      .bg(i === view.commandAt ? t.selected : t.surface).hover((s) => s.bg(t.hover))
+      .on_click((_e, cx) => view.complete(c, cx))
+      .child(div().flex_none().text_size(13).font_semibold().text_color(t.foreground).child(`/${c.name}`))
+      .when(Boolean(c.hint), (el) => el.child(div().flex_none().text_size(12).text_color(t.dim).child(c.hint)))
+      .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.muted).child(c.description))))
+    .child(div().px(10).pt(4).pb(2).text_size(11).text_color(t.dim).child("↑↓ to move · Tab or Enter to pick · Esc to clear"));
 }

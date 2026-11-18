@@ -97,10 +97,12 @@ export function noticeRow(item, t) {
   return row().items_center().py(6).child(div().text_size(12).text_color(color).child(item.text));
 }
 
-export function endRow(item, t) {
-  return row().pt(2).pb(12).child(
-    div().text_size(11.5).text_color(item.error ? t.blocked : t.dim)
-      .child(item.error ? `Stopped: ${item.error}` : `Done in ${seconds(item.ms)}`));
+export function endRow(item, t, view) {
+  const copied = view.copied === item.id;
+  return row().pt(2).pb(12).child(h_flex().gap(10).items_center().text_size(11.5)
+    .child(div().text_color(item.error ? t.blocked : t.dim).child(item.error ? `Stopped: ${item.error}` : `Done in ${seconds(item.ms)}`))
+    .when(Boolean(view.replyFor(item.id)), (el) => el.child(div().id(`copy-${item.id}`).text_color(copied ? t.done : t.dim).cursor_pointer()
+      .hover((s) => s.text_color(t.foreground)).on_click((_e, cx) => view.copyReply(item.id, cx)).child(copied ? "Copied" : "Copy"))));
 }
 
 const base = (path) => path.split("/").pop();
@@ -182,7 +184,7 @@ export function groupRow(group, t, view, children) {
       return bits.map((b) => div().flex_none().when(Boolean(b.color), (el) => el.text_color(b.color)).child(b.text));
     }) : [div().child(thinking ? "Thinking" : "Thought")])
     .child(div().flex_none().text_size(12).child(open ? "⌄" : "›"))
-    .when(Boolean(running), (el) => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`${running.verb} ${running.meta}…`)))
+    .when(Boolean(running), (el) => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`${running.verb}${running.meta ? ` ${running.meta}` : ""}…`)))
     .when(!running, (el) => el.child(div().flex_1()))
     .when(failed > 0, (el) => el.child(div().flex_none().text_color(t.blocked).child(`${failed} failed`)))
     .children(thumbs.slice(0, 4).map((th, n) => div().id(`thumb-${group.id}-${n}`).flex_none().ml(4).w(40).h(26).rounded(4).border_1().border_color(t.border).overflow_hidden()
