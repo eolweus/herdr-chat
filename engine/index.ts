@@ -109,6 +109,14 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
       if (url !== undefined) ws.send(JSON.stringify({ type: "auth", server, url }));
       return;
     }
+    case "mcp_list": return ws.send(JSON.stringify({ type: "mcp", servers: await s.servers() }));
+    case "mcp_action":
+      try {
+        await s.mcpAction(String(m.server), String(m.action));
+      } catch (e: any) {
+        ws.send(JSON.stringify({ type: "error", message: `${m.action} ${m.server}: ${e?.message ?? e}` }));
+      }
+      return ws.send(JSON.stringify({ type: "mcp", servers: await s.servers() }));
     case "mcp_callback": return s.signInCallback(String(m.server), String(m.url)).catch(() => {});
   }
 }

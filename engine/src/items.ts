@@ -65,6 +65,7 @@ export type State = {
 };
 
 export type Mcp = { name: string; label: string };
+export type McpServer = Mcp & { status: string; error: string | null; tools: number; scope: string | null };
 
 export type Model = { value: string; name: string; description: string };
 

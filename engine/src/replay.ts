@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { Session } from "./session";
+import type { McpServer } from "./items";
 
 const STREAM_MS = 12;
 const STEP_MS = 60;
@@ -41,6 +42,27 @@ export class ReplaySession extends Session {
     ];
     this.n.setState({ usage: { total: 86700, max: 400000, categories }, context: { used: 86700, max: 400000 } });
     this.schedule();
+  }
+
+  private fake: McpServer[] = [
+    { name: "logfire", label: "logfire", status: "connected", error: null, tools: 70, scope: "user" },
+    { name: "claude.ai Slack", label: "Slack", status: "connected", error: null, tools: 27, scope: "claudeai" },
+    { name: "claude.ai Gmail", label: "Gmail", status: "needs-auth", error: null, tools: 0, scope: "claudeai" },
+    { name: "plugin:data:hex", label: "hex", status: "needs-auth", error: null, tools: 0, scope: "dynamic" },
+    { name: "plugin:data:definite", label: "definite", status: "failed", error: "MCP endpoint not found at https://api.definite.app", tools: 0, scope: "dynamic" },
+    { name: "pencil", label: "pencil", status: "disabled", error: null, tools: 0, scope: "user" },
+  ];
+
+  override async servers() {
+    return this.fake;
+  }
+
+  override async mcpAction(server: string, action: string) {
+    const m = this.fake.find((x) => x.name === server);
+    if (!m) return;
+    m.status = action === "disable" ? "disabled" : action === "signout" ? "needs-auth" : "connected";
+    m.tools = m.status === "connected" ? 12 : 0;
+    m.error = null;
   }
 
   protected override start() {

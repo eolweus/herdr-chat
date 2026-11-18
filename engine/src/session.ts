@@ -1,7 +1,7 @@
 import { getSessionMessages, query, type PermissionResult, type PermissionUpdate, type Query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import type { Image, Item, State } from "./items";
+import type { Image, Item, McpServer, State } from "./items";
 import { Normalizer, commandsOf } from "./normalizer";
 import { describe } from "./tools";
 
@@ -22,6 +22,8 @@ type Pending = {
 };
 
 const FLUSH_MS = 50;
+const label = (name: string) => name.split(":").pop()!.replace(/^claude\.ai /, "");
+
 let knownCommands: State["commands"] = [];
 let knownModels: State["models"] = [];
 
@@ -218,13 +220,33 @@ export class Session {
   protected async mcp() {
     const list = await this.q?.mcpServerStatus().catch(() => null);
     if (!list) return;
-    this.n.setState({ mcp: list.filter((m) => m.status === "needs-auth").map((m) => ({ name: m.name, label: m.name.split(":").pop()! })) });
+    this.n.setState({ mcp: list.filter((m) => m.status === "needs-auth").map((m) => ({ name: m.name, label: label(m.name) })) });
     this.schedule();
   }
 
-  async signIn(server: string): Promise<string | null> {
+  protected async ready() {
     if (!this.q) this.start();
     await this.q!.initializationResult();
+  }
+
+  async servers(): Promise<McpServer[]> {
+    await this.ready();
+    const list = await this.q!.mcpServerStatus();
+    this.n.setState({ mcp: list.filter((m) => m.status === "needs-auth").map((m) => ({ name: m.name, label: label(m.name) })) });
+    this.schedule();
+    return list.map((m) => ({ name: m.name, label: label(m.name), status: m.status, error: m.error ?? null, tools: m.tools?.length ?? 0, scope: m.scope ?? null }));
+  }
+
+  async mcpAction(server: string, action: string) {
+    await this.ready();
+    const q = this.q as any;
+    if (action === "reconnect") await q.reconnectMcpServer(server);
+    else if (action === "enable" || action === "disable") await q.toggleMcpServer(server, action === "enable");
+    else if (action === "signout") await q.mcpClearAuth(server);
+  }
+
+  async signIn(server: string): Promise<string | null> {
+    await this.ready();
     const r = await (this.q as any).mcpAuthenticate(server);
     this.watchSignIn(server);
     return r?.authUrl ?? null;
@@ -251,7 +273,7 @@ export class Session {
       await Bun.sleep(2000);
       const s = (await this.q?.mcpServerStatus().catch(() => null))?.find((m) => m.name === server);
       if (s?.status !== "connected") continue;
-      this.n.notice("info", `Signed in to ${server.split(":").pop()}`);
+      this.n.notice("info", `Signed in to ${label(server)}`);
       return this.mcp();
     }
   }
