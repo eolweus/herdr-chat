@@ -178,10 +178,23 @@ export class Session {
     this.n.feed(msg);
     if (this.state.session !== before) this.onSession(this);
     if (msg.type === "result") {
+      this.usage();
       const next = this.queued.shift();
       if (next) { this.send(next); this.changed(); }
     }
     this.schedule();
+  }
+
+  protected async usage() {
+    try {
+      const u = await this.q?.getContextUsage({ detail: "summary" });
+      if (!u) return;
+      this.n.setState({
+        usage: { total: u.totalTokens, max: u.maxTokens, categories: u.categories.map(({ id, name, tokens, kind }) => ({ id, name, tokens, kind })) },
+        context: { used: u.totalTokens, max: u.maxTokens },
+      });
+      this.schedule();
+    } catch {}
   }
 
   protected ask(tool: string, input: Record<string, unknown>, toolUseID: string, suggestions?: PermissionUpdate[]): Promise<PermissionResult> {

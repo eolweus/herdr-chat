@@ -20,6 +20,7 @@ export type Item =
       verb: string;
       meta: string;
       detail?: string;
+      path?: string;
       status: ToolStatus;
       result?: string;
       images?: Image[];
@@ -57,4 +58,11 @@ export type State = {
   context: { used: number; max: number };
   queue: { id: string; text: string; images: number }[];
   session: string | null;
+  usage: Usage | null;
+};
+
+export type Usage = {
+  total: number;
+  max: number;
+  categories: { id?: string; name: string; tokens: number; kind: string }[];
 };

@@ -1,6 +1,6 @@
 type Input = Record<string, any>;
 
-export type Described = { running: string; done: string; meta: string; detail?: string };
+export type Described = { running: string; done: string; meta: string; detail?: string; path?: string };
 
 const MAX_DETAIL_LINES = 80;
 
@@ -34,6 +34,12 @@ function firstString(input: Input): string {
 }
 
 export function describe(name: string, input: Input, cwd: string): Described {
+  const abs = input.file_path ?? input.notebook_path;
+  const d = describeTool(name, input, cwd);
+  return typeof abs === "string" ? { ...d, path: abs } : d;
+}
+
+function describeTool(name: string, input: Input, cwd: string): Described {
   const path = rel(input.file_path ?? input.notebook_path ?? input.path, cwd);
   switch (name) {
     case "Bash":

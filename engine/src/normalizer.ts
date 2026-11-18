@@ -7,7 +7,7 @@ const RESULT_LIMIT = 4000;
 const HIDDEN_TOOLS = new Set(["AskUserQuestion"]);
 
 export function newState(): State {
-  return { busy: false, status: null, mode: "default", model: "", context: { used: 0, max: 0 }, queue: [], session: null };
+  return { busy: false, status: null, mode: "default", model: "", context: { used: 0, max: 0 }, queue: [], session: null, usage: null };
 }
 
 function textOf(content: unknown): string {
@@ -168,11 +168,11 @@ export class Normalizer {
     const d = describe(name, input, this.cwd);
     const existing = this.byId.get(id);
     if (existing?.kind === "tool") {
-      Object.assign(existing, { meta: d.meta, detail: d.detail, verb: existing.status === "ok" || existing.status === "error" ? d.done : d.running });
+      Object.assign(existing, { meta: d.meta, detail: d.detail, path: d.path, verb: existing.status === "ok" || existing.status === "error" ? d.done : d.running });
       this.touch(existing);
       return existing;
     }
-    const item: ItemOf<"tool"> = { id, kind: "tool", name, verb: d.running, meta: d.meta, detail: d.detail, status: "running", parent };
+    const item: ItemOf<"tool"> = { id, kind: "tool", name, verb: d.running, meta: d.meta, detail: d.detail, path: d.path, status: "running", parent };
     if (parent) {
       const p = this.byId.get(parent);
       if (p?.kind === "tool") { p.children = (p.children ?? 0) + 1; this.touch(p); }

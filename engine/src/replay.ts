@@ -11,6 +11,21 @@ export class ReplaySession extends Session {
   static fixture = "";
   private round = 0;
 
+  protected override async usage() {
+    const categories = [
+      { id: "messages", name: "Messages", tokens: 41200, kind: "used" },
+      { id: "mcp_tools", name: "MCP tools", tokens: 9800, kind: "used" },
+      { id: "system_tools", name: "System tools", tokens: 17800, kind: "used" },
+      { id: "skills", name: "Skills", tokens: 4100, kind: "used" },
+      { id: "system_prompt", name: "System prompt", tokens: 9200, kind: "used" },
+      { id: "memory_files", name: "Memory files", tokens: 4600, kind: "used" },
+      { id: "autocompact_buffer", name: "Autocompact buffer", tokens: 33000, kind: "buffer" },
+      { id: "free_space", name: "Free space", tokens: 280300, kind: "free" },
+    ];
+    this.n.setState({ usage: { total: 86700, max: 400000, categories }, context: { used: 86700, max: 400000 } });
+    this.schedule();
+  }
+
   protected override start() {
     const lines = readFileSync(ReplaySession.fixture, "utf8").split("\n").filter(Boolean);
     const r = ++this.round;
