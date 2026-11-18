@@ -161,6 +161,7 @@ export class Session {
         pathToClaudeCodeExecutable: CLAUDE,
         includePartialMessages: true,
         settingSources: ["user", "project", "local"],
+        systemPrompt: { type: "preset", preset: "claude_code" },
         permissionMode: this.options.permissionMode as any,
         model: this.options.model,
         canUseTool: (tool, input, opts) => this.ask(tool, input, opts.toolUseID, opts.suggestions),
