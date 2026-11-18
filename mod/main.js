@@ -25,6 +25,12 @@ export default class HerdrChat extends View {
   }
 
   async connect(cx) {
+    const machine = props()?.machine;
+    if (machine) {
+      this.status = `not available on ${machine} yet`;
+      this.items.push({ kind: "error", text: `Chat only runs on this computer for now. ${machine} gets its own engine in milestone 1.` });
+      return cx.notify();
+    }
     try {
       await fs.mkdir(`${appHome()}/${DATA}`, { recursive: true });
       this.ws = await WebSocket.connect(URL);
