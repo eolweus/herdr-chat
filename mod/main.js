@@ -73,6 +73,7 @@ export default class HerdrChat extends View {
         const c = await nextCommand();
         if (c === "focus") this.input.focus();
         else if (c === "compact" && this.active()) this.send({ type: "prompt", text: "/compact", images: [] });
+        else if (c === "signin" && shared("herdr-chat:signin")?.key === this.key) this.signIn(shared("herdr-chat:signin").server);
         cx.notify();
       }
     });
@@ -103,7 +104,7 @@ export default class HerdrChat extends View {
     const s = this.state;
     const data = {
       key: this.key, pane: this.pane, machine: this.machine, folder: tilde(this.cwd, this.home), branch: this.branch ?? null,
-      model: s.model, mode: s.mode, usage: s.usage ?? null, context: s.context, outputs: this.outputs(),
+      model: s.model, mode: s.mode, usage: s.usage ?? null, context: s.context, outputs: this.outputs(), mcp: s.mcp ?? [],
     };
     const json = JSON.stringify(data);
     if (json === this.published) return;
@@ -226,6 +227,7 @@ export default class HerdrChat extends View {
   async receive(m, cx) {
     if (m.type === "hello" && m.v !== PROTOCOL) this.error = `engine speaks protocol ${m.v}, this pane ${PROTOCOL}`;
     else if (m.type === "error") this.error = m.message;
+    else if (m.type === "auth") await this.openAuth(m.server, m.url);
     else if (m.type === "state") this.setState(m.state);
     else if (m.type === "snapshot") {
       this.items = [];
@@ -401,6 +403,34 @@ export default class HerdrChat extends View {
     });
     if (Object.keys(answers).length < item.questions.length) return;
     this.answer({ item: item.id, answers }, cx);
+  }
+
+  // Servers needing sign-in that the reply talks about, so the button sits where Claude said it couldn't get in.
+  authFor(endId) {
+    const reply = this.replyFor(endId).toLowerCase();
+    return (this.state.mcp ?? []).filter((m) => reply.includes(m.label.toLowerCase()));
+  }
+
+  signIn(server) {
+    this.auth = { server, url: null, input: null };
+    this.send({ type: "mcp_auth", server });
+  }
+
+  async openAuth(server, url) {
+    if (!url) return (this.auth = null);
+    await exec("open", [url]);
+    const port = new URL(new URL(url).searchParams.get("redirect_uri") ?? "http://x").port;
+    if (this.machine && port) {
+      await exec("sh", ["-c", `(ssh -o ExitOnForwardFailure=yes -N -L ${port}:127.0.0.1:${port} ${this.machine} & p=$!; sleep 300; kill $p) >/dev/null 2>&1 &`]);
+    }
+    const input = this.machine ? InputState.new({ placeholder: "Browser showed an error? Paste its address here" }) : null;
+    input?.on("enter", (_e, cx) => {
+      const v = input.value().trim();
+      if (v) this.send({ type: "mcp_callback", server, url: v });
+      input.set_value("");
+      cx.notify();
+    });
+    this.auth = { server, url, input };
   }
 
   replyFor(endId) {

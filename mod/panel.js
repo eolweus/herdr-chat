@@ -1,6 +1,6 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { run, shared, theme } from "herdr";
+import { run, setShared, shared, theme } from "herdr";
 
 const fmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1)}k` : String(n));
 
@@ -61,11 +61,18 @@ export class Panel {
         .when(o.add > 0, (el) => el.child(div().text_size(11.5).text_color(t.ansi2).child(`+${o.add}`)))
         .when(o.del > 0, (el) => el.child(div().text_size(11.5).text_color(t.ansi1).child(`-${o.del}`)))));
 
+    const mcp = a.mcp?.length ? section("Needs sign-in").children(a.mcp.map((m) => h_flex().gap(10).items_center().min_w(0).text_size(12.5)
+      .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(m.label))
+      .child(div().id(`signin-${m.name}`).flex_none().px(8).py(2).rounded(6).border_1().border_color(t.border).bg(t.raised).text_size(11.5)
+        .cursor_pointer().hover((s) => s.bg(t.hover))
+        .on_click(() => { setShared("herdr-chat:signin", { key: a.key, server: m.name }); run("herdr-chat.signin"); })
+        .child("Sign in")))) : null;
+
     const todos = a.todos?.length ? section("Tasks").children(a.todos.map((td) => h_flex().gap(8).text_size(12.5)
       .child(div().w(16).text_color(td.status === "completed" ? t.done : td.status === "in_progress" ? t.working : t.dim)
         .child(td.status === "completed" ? "✓" : td.status === "in_progress" ? "◐" : "○"))
       .child(div().flex_1().text_color(td.status === "completed" ? t.dim : t.foreground).child(td.content)))) : null;
 
-    return root.child(env).when(Boolean(todos), (el) => el.child(todos)).child(ctx).child(outputs);
+    return root.child(env).when(Boolean(todos), (el) => el.child(todos)).child(ctx).child(outputs).when(Boolean(mcp), (el) => el.child(mcp));
   }
 }

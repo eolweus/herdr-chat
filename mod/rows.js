@@ -1,5 +1,5 @@
 import { div, image } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
+import { v_flex, h_flex, Input } from "gpui-base";
 import { markdown, codeBlock, diffBlock } from "./markdown.js";
 
 const DIFF_TOOLS = ["Edit", "MultiEdit", "Write"];
@@ -102,7 +102,22 @@ export function endRow(item, t, view) {
   return row().pt(2).pb(12).child(h_flex().gap(10).items_center().text_size(11.5)
     .child(div().text_color(item.error ? t.blocked : t.dim).child(item.error ? `Stopped: ${item.error}` : `Done in ${seconds(item.ms)}`))
     .when(Boolean(view.replyFor(item.id)), (el) => el.child(div().id(`copy-${item.id}`).text_color(copied ? t.done : t.dim).cursor_pointer()
-      .hover((s) => s.text_color(t.foreground)).on_click((_e, cx) => view.copyReply(item.id, cx)).child(copied ? "Copied" : "Copy"))));
+      .hover((s) => s.text_color(t.foreground)).on_click((_e, cx) => view.copyReply(item.id, cx)).child(copied ? "Copied" : "Copy"))))
+    .children(view.authFor(item.id).map((m) => signInRow(m, t, view)));
+}
+
+export function signInRow(m, t, view) {
+  const auth = view.auth?.server === m.name ? view.auth : null;
+  return v_flex().w_full().mt(8).gap(8).p(12).rounded(10).border_1().border_color(t.border).bg(t.surface)
+    .child(h_flex().gap(10).items_center()
+      .child(div().flex_1().min_w(0).text_size(12.5).text_color(t.foreground)
+        .child(auth?.url ? `Finish signing in to ${m.label} in your browser, then ask again.` : `${m.label} needs you to sign in before Claude can use it.`))
+      .child(div().id(`signin-${m.name}`).flex_none().px(12).py(5).rounded(7).cursor_pointer().text_size(12.5)
+        .bg(t.solid).text_color(t.solid_foreground).hover((s) => s.opacity(0.85))
+        .on_click((_e, cx) => { view.signIn(m.name); cx.notify(); })
+        .child(auth ? (auth.url ? "Open again" : "Opening…") : `Sign in to ${m.label}`)))
+    .when(Boolean(auth?.input), (el) => el.child(h_flex().h(30).px(10).items_center().rounded(7).border_1().border_color(t.border).bg(t.background)
+      .child(Input.new(auth.input).flex_1().text_size(12.5))));
 }
 
 const base = (path) => path.split("/").pop();
