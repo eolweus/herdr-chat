@@ -1,6 +1,9 @@
 import { div, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { markdown, codeBlock } from "./markdown.js";
+import { markdown, codeBlock, diffBlock } from "./markdown.js";
+
+const DIFF_TOOLS = ["Edit", "MultiEdit", "Write"];
+const QUIET_TOOLS = ["Edit", "MultiEdit", "Write", "Read", "NotebookEdit", "TodoWrite"];
 
 const SPIN = ["◐", "◓", "◑", "◒"];
 
@@ -20,7 +23,11 @@ export function userRow(item, t, view) {
       .when(item.images.length > 0, (el) => el.child(h_flex().gap(6).flex_wrap()
         .children(item.images.map((_, i) => {
           const path = view.imagePath(item.id, i);
-          return path ? image(path).max_w(240).max_h(240).rounded(8) : div().w(120).h(80).rounded(8).bg(t.surface);
+          const all = item.images.map((_, j) => view.imagePath(item.id, j)).filter(Boolean);
+          return path
+            ? div().id(`uimg-${item.id}-${i}`).w(160).h(100).rounded(8).overflow_hidden().border_1().border_color(t.border).cursor_pointer()
+              .on_click(() => view.viewImages(all, all.indexOf(path))).child(image(path).size_full())
+            : div().w(160).h(100).rounded(8).bg(t.surface);
         }))))
       .when(Boolean(item.text), (el) => el.child(div().text_size(14).child(item.text))));
 }
@@ -44,7 +51,8 @@ export function thinkingRow(item, t, view) {
 
 export function toolRow(item, t, view, children) {
   const open = view.expanded.has(item.id);
-  const canOpen = Boolean(item.detail || item.result || item.images?.length || children.length);
+  const showResult = Boolean(item.result) && (item.status === "error" || !QUIET_TOOLS.includes(item.name));
+  const canOpen = Boolean(item.detail || showResult || item.images?.length || children.length);
   const running = item.status === "running" && children.length;
   const latest = running ? children.at(-1) : null;
   return row().py(3).child(
@@ -58,6 +66,7 @@ export function toolRow(item, t, view, children) {
       .when(canOpen, (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(open ? "▾" : "▸"))))
     .when(open, (el) => el.child(v_flex().mt(6).ml(22).gap(6)
       .when(Boolean(item.detail), (el) => {
+        if (DIFF_TOOLS.includes(item.name)) return el.child(diffBlock(item.detail, t, view.mono));
         const state = view.codes.peek(`detail:${item.id}`);
         return el.child(state ? codeBlock(state, item.detail, t, { maxLines: 30 }) : div());
       })
@@ -65,13 +74,16 @@ export function toolRow(item, t, view, children) {
         h_flex().gap(8).items_center().text_size(12.5).child(dot(c.status, t))
           .child(div().font_semibold().child(c.verb))
           .child(div().truncate().text_color(t.muted).child(c.meta))))))
-      .when(Boolean(item.result), (el) => el.child(
+      .when(showResult, (el) => el.child(
         div().max_h(260).overflow_hidden().px(10).py(8).rounded(8).bg(t.surface).border_1().border_color(t.border)
           .font_family(view.mono).text_size(12).text_color(item.status === "error" ? t.blocked : t.muted)
           .child(clipLines(item.result, 14))))
       .when(Boolean(item.images?.length), (el) => el.child(h_flex().gap(6).children((item.images ?? []).map((_, i) => {
         const path = view.imagePath(item.id, i);
-        return path ? image(path).max_w(360).rounded(8) : div();
+        return path
+          ? div().id(`timg-${item.id}-${i}`).w(240).h(150).rounded(8).overflow_hidden().border_1().border_color(t.border).cursor_pointer()
+            .on_click(() => view.viewImages([path], 0)).child(image(path).size_full())
+          : div();
       }))))));
 }
 
@@ -89,4 +101,95 @@ export function endRow(item, t) {
   return row().pt(2).pb(12).child(
     div().text_size(11.5).text_color(item.error ? t.blocked : t.dim)
       .child(item.error ? `Stopped: ${item.error}` : `Done in ${seconds(item.ms)}`));
+}
+
+const base = (path) => path.split("/").pop();
+
+function diffCount(detail) {
+  const lines = (detail ?? "").split("\n");
+  return { add: lines.filter((l) => l.startsWith("+")).length, del: lines.filter((l) => l.startsWith("-")).length };
+}
+
+const plural = (n, one, many) => (n === 1 ? one : `${n} ${many}`);
+
+// "Ran 2 commands, read notes.txt, edited main.js +3 -1": counts per kind of tool, in order of first use.
+export function summarize(tools) {
+  const kinds = new Map();
+  const add = (key, tool) => { if (!kinds.has(key)) kinds.set(key, []); kinds.get(key).push(tool); };
+  for (const tool of tools) {
+    const n = tool.name;
+    if (n === "Bash") add("bash", tool);
+    else if (n === "Read") add("read", tool);
+    else if (n === "Edit" || n === "MultiEdit" || n === "NotebookEdit") add("edit", tool);
+    else if (n === "Write") add("write", tool);
+    else if (n === "Grep" || n === "Glob") add("search", tool);
+    else if (n === "WebFetch") add("fetch", tool);
+    else if (n === "WebSearch") add("web", tool);
+    else if (n === "Task" || n === "Agent") add("agent", tool);
+    else if (n === "TodoWrite") add("todo", tool);
+    else if (n === "ToolSearch") add("toolsearch", tool);
+    else if (n === "Skill") add("skill", tool);
+    else if (n.startsWith("mcp__")) add(`mcp:${n.split("__")[1]}`, tool);
+    else add(`other:${n}`, tool);
+  }
+  const parts = [];
+  for (const [key, list] of kinds) {
+    const c = list.length;
+    const files = [...new Set(list.map((t) => base(t.meta)))];
+    const stat = list.reduce((s, t) => { const d = diffCount(t.detail); return { add: s.add + d.add, del: s.del + d.del }; }, { add: 0, del: 0 });
+    switch (key) {
+      case "bash": parts.push({ text: `ran ${plural(c, "a command", "commands")}` }); break;
+      case "read": parts.push({ text: files.length === 1 ? "read" : `read ${files.length} files`, file: files.length === 1 ? files[0] : null }); break;
+      case "edit": parts.push({ text: files.length === 1 ? "edited" : `edited ${files.length} files`, file: files.length === 1 ? files[0] : null, ...stat }); break;
+      case "write": parts.push({ text: files.length === 1 ? "created" : `created ${files.length} files`, file: files.length === 1 ? files[0] : null, add: stat.add }); break;
+      case "search": parts.push({ text: `searched${c > 1 ? ` ${c} times` : ""}` }); break;
+      case "fetch": parts.push({ text: `fetched ${plural(c, "a page", "pages")}` }); break;
+      case "web": parts.push({ text: "searched the web" }); break;
+      case "agent": parts.push({ text: `ran ${plural(c, "an agent", "agents")}` }); break;
+      case "todo": parts.push({ text: "updated todos" }); break;
+      case "toolsearch": parts.push({ text: "loaded tools" }); break;
+      case "skill": parts.push({ text: `used ${c === 1 ? `the ${list[0].meta} skill` : `${c} skills`}` }); break;
+      default:
+        if (key.startsWith("mcp:")) parts.push({ text: `used ${key.slice(4)}${c > 1 ? ` ${c} times` : ""}` });
+        else parts.push({ text: `used ${key.slice(6)}${c > 1 ? ` ${c} times` : ""}` });
+    }
+  }
+  if (parts.length) parts[0].text = parts[0].text[0].toUpperCase() + parts[0].text.slice(1);
+  return parts;
+}
+
+export function groupRow(group, t, view, children) {
+  const open = view.expanded.has(group.id);
+  const tools = group.items.filter((i) => i.kind === "tool");
+  const running = tools.find((i) => i.status === "running" || i.status === "waiting");
+  const failed = tools.filter((i) => i.status === "error").length;
+  const thinking = group.items.find((i) => i.kind === "thinking" && i.streaming);
+  const parts = summarize(tools);
+  const thumbs = tools.flatMap((tool) => (tool.images ?? []).map((_, i) => ({ id: tool.id, i, path: view.imagePath(tool.id, i) }))).filter((x) => x.path);
+  const line = h_flex().id(`group-${group.id}`).gap(6).items_center().min_w(0).text_size(13.5).text_color(t.dim)
+    .cursor_pointer().hover((s) => s.text_color(t.muted))
+    .on_click((_e, cx) => view.toggle(group.id, cx))
+    .when(Boolean(running || thinking), (el) => el.child(div().text_size(11).text_color(t.working).frames(SPIN, 120)))
+    .children(parts.length ? parts.flatMap((p, i) => {
+      const comma = i < parts.length - 1 ? "," : "";
+      const tail = [
+        ...(p.file ? [{ text: p.file, color: t.foreground }] : []),
+        ...(p.add ? [{ text: `+${p.add}`, color: t.ansi2 }] : []),
+        ...(p.del ? [{ text: `-${p.del}`, color: t.ansi1 }] : []),
+      ];
+      const bits = [{ text: p.text, color: null }, ...tail];
+      bits[bits.length - 1].text += comma;
+      return bits.map((b) => div().flex_none().when(Boolean(b.color), (el) => el.text_color(b.color)).child(b.text));
+    }) : [div().child(thinking ? "Thinking" : "Thought")])
+    .child(div().flex_none().text_size(12).child(open ? "⌄" : "›"))
+    .when(Boolean(running), (el) => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`${running.verb} ${running.meta}…`)))
+    .when(!running, (el) => el.child(div().flex_1()))
+    .when(failed > 0, (el) => el.child(div().flex_none().text_color(t.blocked).child(`${failed} failed`)))
+    .children(thumbs.slice(0, 4).map((th, n) => div().id(`thumb-${group.id}-${n}`).flex_none().ml(4).w(40).h(26).rounded(4).border_1().border_color(t.border).overflow_hidden()
+      .cursor_pointer().on_click((_e, cx) => { cx.stop_propagation(); view.viewImages(thumbs.map((x) => x.path), n); })
+      .child(image(th.path).size_full())));
+  return v_flex().w_full().px(22).py(5)
+    .child(line)
+    .when(open, (el) => el.child(v_flex().mt(4).ml(4).pl(8).border_l_1().border_color(t.border)
+      .children(group.items.map((i) => (i.kind === "tool" ? toolRow(i, t, view, children.get(i.id) ?? []) : thinkingRow(i, t, view)).px(8)))));
 }

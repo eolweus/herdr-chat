@@ -1,6 +1,6 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
-import { codeBlock, markdown } from "./markdown.js";
+import { codeBlock, diffBlock, markdown } from "./markdown.js";
 
 function button(id, label, t, kind, fn) {
   const primary = kind === "primary";
@@ -25,7 +25,8 @@ export function permissionCard(item, t, view) {
       .child(div().flex_none().text_size(13.5).font_semibold().child(title))
       .when(Boolean(item.meta), (el) => el.child(div().flex_1().min_w(0).truncate().text_size(12.5).text_color(t.muted).child(item.meta))))
     .when(Boolean(item.plan), (el) => el.child(div().max_h(420).overflow_hidden().child(markdown(item.id, item.plan, t, view.codes, { size: 13 }))))
-    .when(Boolean(item.detail) && Boolean(view.codes.peek(`detail:${item.id}`)), (el) =>
+    .when(Boolean(item.detail) && ["Edit", "MultiEdit", "Write"].includes(item.tool), (el) => el.child(diffBlock(item.detail, t, view.mono, 24)))
+    .when(Boolean(item.detail) && !["Edit", "MultiEdit", "Write"].includes(item.tool) && Boolean(view.codes.peek(`detail:${item.id}`)), (el) =>
       el.child(codeBlock(view.codes.peek(`detail:${item.id}`), item.detail, t, { maxLines: 24 })))
     .child(pending
       ? v_flex().gap(6)

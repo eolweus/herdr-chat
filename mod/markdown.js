@@ -86,3 +86,19 @@ export function markdown(id, text, t, codes, { size = 14 } = {}) {
     return codeBlock(state, p.code, t, { label: p.lang, maxLines: 400 });
   }));
 }
+
+const tint = (hex, alpha) => (/^#[0-9a-f]{6}$/i.test(hex ?? "") ? `${hex}${alpha}` : hex);
+
+export function diffBlock(detail, t, mono, maxLines = 30) {
+  const lines = detail.split("\n");
+  const shown = lines.slice(0, maxLines);
+  return v_flex().w_full().py(6).rounded(8).border_1().border_color(t.border).bg(t.surface).overflow_hidden()
+    .font_family(mono).text_size(12)
+    .children(shown.map((l) => {
+      const sign = l[0];
+      const bg = sign === "+" ? tint(t.ansi2, "22") : sign === "-" ? tint(t.ansi1, "22") : null;
+      return div().w_full().px(10).when(Boolean(bg), (el) => el.bg(bg))
+        .text_color(sign === "+" || sign === "-" ? t.foreground : t.dim).child(l || " ");
+    }))
+    .when(lines.length > maxLines, (el) => el.child(div().px(10).pt(2).text_color(t.dim).child(`… ${lines.length - maxLines} more lines`)));
+}
