@@ -72,7 +72,9 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
     const s = open(String(m.key || crypto.randomUUID()), String(m.cwd || HOME));
     d.session = s;
     await s.load();
-    return s.attach(d.client);
+    s.attach(d.client);
+    if (!existsSync(s.cwd)) ws.send(JSON.stringify({ type: "error", message: `${s.cwd} doesn't exist on this machine` }));
+    return;
   }
   const s = d.session;
   if (!s) return;
