@@ -66,7 +66,9 @@ export class Panel {
       .child(div().id(`signin-${m.name}`).flex_none().px(8).py(2).rounded(6).border_1().border_color(t.border).bg(t.raised).text_size(11.5)
         .cursor_pointer().hover((s) => s.bg(t.hover))
         .on_click(() => { setShared("herdr-chat:signin", { key: a.key, server: m.name }); run("herdr-chat.signin"); })
-        .child("Sign in")))) : null;
+        .child("Sign in"))))
+      .child(div().id("mcp-manage").text_size(11.5).text_color(t.dim).cursor_pointer().hover((s) => s.text_color(t.foreground))
+        .on_click(() => run("herdr-chat.mcp")).child("Manage all servers…")) : null;
 
     const todos = a.todos?.length ? section("Tasks").children(a.todos.map((td) => h_flex().gap(8).text_size(12.5)
       .child(div().w(16).text_color(td.status === "completed" ? t.done : td.status === "in_progress" ? t.working : t.dim)

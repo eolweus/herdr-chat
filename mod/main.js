@@ -45,6 +45,7 @@ export default class HerdrChat extends View {
     this.expandAll = Boolean(p.expand);
     this.mono = settings().font_family;
     this.modelMenu = Boolean(p.models);
+    this.mcpMenu = p.mcp ? { servers: null, busy: new Set() } : null;
     this.picks = new Map();
     this.otherInputs = new Map();
     this.images = new Map();
@@ -73,6 +74,7 @@ export default class HerdrChat extends View {
         const c = await nextCommand();
         if (c === "focus") this.input.focus();
         else if (c === "compact" && this.active()) this.send({ type: "prompt", text: "/compact", images: [] });
+        else if (c === "mcp" && this.active()) this.openMcp(null);
         else if (c === "signin" && shared("herdr-chat:signin")?.key === this.key) this.signIn(shared("herdr-chat:signin").server);
         cx.notify();
       }
@@ -228,6 +230,10 @@ export default class HerdrChat extends View {
     if (m.type === "hello" && m.v !== PROTOCOL) this.error = `engine speaks protocol ${m.v}, this pane ${PROTOCOL}`;
     else if (m.type === "error") this.error = m.message;
     else if (m.type === "auth") await this.openAuth(m.server, m.url);
+    else if (m.type === "mcp" && this.mcpMenu) {
+      this.mcpMenu = { servers: m.servers, busy: new Set() };
+      if (m.servers.some((x) => x.status === "pending")) cx.timer.after(2000, () => { if (this.mcpMenu) this.send({ type: "mcp_list" }); });
+    }
     else if (m.type === "state") this.setState(m.state);
     else if (m.type === "snapshot") {
       this.items = [];
@@ -243,6 +249,7 @@ export default class HerdrChat extends View {
 
   setState(next) {
     const was = this.state.busy;
+    if (this.mcpMenu && (!this.mcpMenu.servers || JSON.stringify(next.mcp) !== JSON.stringify(this.state.mcp))) this.send({ type: "mcp_list" });
     this.state = next;
     if (was && !next.busy && !this.visible()) this.unseen = true;
     this.publish(false);
@@ -342,7 +349,7 @@ export default class HerdrChat extends View {
     const v = this.input.value();
     if (!v.startsWith("/") || /\s/.test(v.trimEnd()) || v.includes("\n")) return [];
     const q = v.slice(1).trim().toLowerCase();
-    const list = this.state.commands ?? [];
+    const list = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp"), { name: "mcp", description: "Manage MCP servers", hint: "" }];
     const starts = list.filter((c) => c.name.toLowerCase().startsWith(q));
     const contains = list.filter((c) => !c.name.toLowerCase().startsWith(q) && (c.name + " " + c.description).toLowerCase().includes(q));
     return [...starts, ...contains].slice(0, 8);
@@ -361,6 +368,10 @@ export default class HerdrChat extends View {
 
   submit(cx) {
     const text = this.input.value().trim();
+    if (text === "/mcp") {
+      this.input.set_value("");
+      return this.openMcp(cx);
+    }
     if (!this.ws || (!text && !this.attachments.length)) return;
     const waiting = this.pending();
     if (waiting && text && !this.attachments.length) {
@@ -459,6 +470,21 @@ export default class HerdrChat extends View {
     cx.notify();
   }
 
+  openMcp(cx) {
+    this.mcpMenu = { servers: this.mcpMenu?.servers ?? null, busy: new Set() };
+    this.modelMenu = false;
+    this.send({ type: "mcp_list" });
+    cx?.notify();
+  }
+
+  mcpAction(server, action, cx) {
+    if (!this.mcpMenu) return;
+    this.mcpMenu.busy.add(server);
+    if (action === "signin") this.signIn(server);
+    else this.send({ type: "mcp_action", server, action });
+    cx.notify();
+  }
+
   toggleModels(cx) {
     this.modelMenu = !this.modelMenu;
     cx.notify();
@@ -532,6 +558,7 @@ export default class HerdrChat extends View {
     } else if (cmds.length && e.keystroke === "tab") this.complete(cmds[this.commandAt] ?? cmds[0], cx);
     else if (cmds.length && e.keystroke === "escape") { this.input.set_value(""); cx.notify(); }
     else if (this.modelMenu && e.keystroke === "escape") { this.modelMenu = false; cx.notify(); }
+    else if (this.mcpMenu && e.keystroke === "escape") { this.mcpMenu = null; cx.notify(); }
     else if (e.keystroke === "escape" && this.state.busy) this.interrupt(cx);
     else if (e.keystroke === "shift-tab") this.cycleMode(cx);
     else return;
