@@ -1,5 +1,5 @@
 import { getSessionMessages, query, type PermissionResult, type PermissionUpdate, type Query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { Image, Item, State } from "./items";
 import { Normalizer, commandsOf } from "./normalizer";
@@ -23,6 +23,15 @@ type Pending = {
 
 const FLUSH_MS = 50;
 let knownCommands: State["commands"] = [];
+
+function defaultMode(): string {
+  try {
+    const settings = JSON.parse(readFileSync(`${process.env.HOME}/.claude/settings.json`, "utf8"));
+    return settings.permissions?.defaultMode ?? "default";
+  } catch {
+    return "default";
+  }
+}
 const CLAUDE = Bun.which("claude") ?? `${process.env.HOME}/.local/bin/claude`;
 const RECORD = process.env.HERDR_CHAT_RECORD;
 
@@ -58,6 +67,7 @@ export class Session {
     this.n = new Normalizer(cwd);
     this.n.state.session = sessionId;
     this.n.state.commands = knownCommands;
+    this.n.state.mode = defaultMode();
   }
 
   get state(): State {

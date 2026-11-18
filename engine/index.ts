@@ -2,6 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { dirname } from "node:path";
 import type { ServerWebSocket } from "bun";
+import { listSessions } from "@anthropic-ai/claude-agent-sdk";
 import { Session, type Client } from "./src/session";
 import { ReplaySession } from "./src/replay";
 
@@ -75,6 +76,27 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
   }
   const s = d.session;
   if (!s) return;
+  if (m.type === "sessions") {
+    const list = replay >= 0 ? [] : await listSessions({ dir: s.cwd, limit: 12 }).catch(() => []);
+    const sessions = list.filter((x) => x.sessionId !== s.state.session && !x.archived).map((x) => ({
+      id: x.sessionId, title: x.customTitle || x.summary || x.firstPrompt || "Untitled", when: x.lastModified, branch: x.gitBranch ?? null,
+    }));
+    return ws.send(JSON.stringify({ type: "sessions", sessions }));
+  }
+  if (m.type === "resume") {
+    if (s.state.busy) return ws.send(JSON.stringify({ type: "error", message: "Stop the current turn first" }));
+    s.close();
+    sessions.delete(s.key);
+    panes[s.key] = { session: String(m.id), cwd: s.cwd };
+    if (replay < 0) savePanes();
+    const next = open(s.key, s.cwd);
+    d.session = next;
+    for (const c of s.clients) if (c !== d.client) next.clients.add(c);
+    await next.load();
+    next.attach(d.client);
+    for (const c of next.clients) if (c !== d.client) c.send(next.snapshot());
+    return;
+  }
   switch (m.type) {
     case "prompt": return s.prompt(String(m.text ?? ""), Array.isArray(m.images) ? m.images : []);
     case "unqueue": return s.unqueue(String(m.id));
