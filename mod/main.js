@@ -474,7 +474,7 @@ export default class HerdrChat extends View {
     const tok = this.slashToken();
     if (!tok || tok.start === this.dismissed) return [];
     const q = tok.q.toLowerCase();
-    const list = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp"), { name: "mcp", description: "Manage MCP servers", hint: "" }, { name: "restart-engine", description: "Restart this machine's chat engine (stops running turns)", hint: "" }];
+    const list = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp"), { name: "mcp", description: "Manage MCP servers", hint: "" }, { name: "restart-engine", description: "Restart a machine's chat engine, copying the code there first if it's remote (stops running turns)", hint: "[machine]" }];
     const starts = list.filter((c) => c.name.toLowerCase().startsWith(q));
     const contains = list.filter((c) => !c.name.toLowerCase().startsWith(q) && (c.name + " " + c.description).toLowerCase().includes(q));
     return [...starts, ...contains].slice(0, 8);
@@ -501,9 +501,11 @@ export default class HerdrChat extends View {
       this.input.set_value("");
       return this.openMcp(cx);
     }
-    if (text === "/restart-engine") {
+    const restart = text.match(/^\/restart-engine(?:\s+(\S+))?$/);
+    if (restart) {
       this.input.set_value("");
-      return this.restartEngine(cx);
+      const m = restart[1];
+      return this.restartEngine(m === undefined ? this.machine : ["mac", "local", "here"].includes(m) ? null : m, cx);
     }
     if (!this.ws || (!text && !this.attachments.length)) return;
     const waiting = this.pending();
@@ -517,12 +519,18 @@ export default class HerdrChat extends View {
     cx.notify();
   }
 
-  // Chats reconnect by themselves and the engine resumes their sessions.
-  restartEngine(cx) {
-    const sh = 'if command -v launchctl >/dev/null; then launchctl kickstart -k "gui/$(id -u)/com.herdr-chat.engine"; else systemctl --user restart herdr-chat; fi';
+  // Chats reconnect by themselves and the engine resumes their sessions. A remote engine runs a
+  // copy of the code, so sync.sh (run here, from the repo this mod is linked from) copies it over and restarts it.
+  restartEngine(machine, cx) {
+    const where = machine ?? "this computer";
+    const sh = machine
+      ? 'cd "$HOME/.config/herdr-app/mods/herdr-chat" && cd "$(pwd -P)/.." && exec zsh -l scripts/sync.sh "$1"'
+      : 'launchctl kickstart -k "gui/$(id -u)/com.herdr-chat.engine"';
+    notify({ title: `Restarting the chat engine on ${where}`, level: "info" });
     cx.spawn(async (cx) => {
-      const r = await exec("sh", ["-c", sh], { on: this.machine }).catch((e) => ({ code: -1, stderr: String(e?.message ?? e) }));
-      if (r.code) this.error = `restart failed: ${r.stderr || r.stdout}`.trim();
+      const r = await exec("zsh", ["-lc", sh, "zsh", machine ?? ""], { timeout: 300000 }).catch((e) => ({ code: -1, stdout: "", stderr: String(e?.message ?? e) }));
+      if (r.code) notify({ title: `Engine restart on ${where} failed`, body: `${r.stderr || r.stdout}`.trim().slice(-400), level: "error" });
+      else notify({ title: `Chat engine restarted on ${where}`, level: "success" });
       cx.notify();
     });
   }
