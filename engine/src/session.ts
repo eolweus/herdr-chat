@@ -103,7 +103,7 @@ export class Session {
   }
 
   snapshot() {
-    return { type: "snapshot", items: this.n.items, state: this.state };
+    return { type: "snapshot", items: this.n.items, state: this.state, cwd: this.cwd };
   }
 
   attach(c: Client) {

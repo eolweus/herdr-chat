@@ -50,6 +50,19 @@ function open(key: string, cwd: string): Session {
   return s;
 }
 
+async function reopen(d: Data, s: Session, session: string | null, cwd: string) {
+  s.close();
+  sessions.delete(s.key);
+  panes[s.key] = { session, cwd, remote: s.wantRemote };
+  if (replay < 0) savePanes();
+  const next = open(s.key, cwd);
+  d.session = next;
+  for (const c of s.clients) if (c !== d.client) next.clients.add(c);
+  await next.load();
+  next.attach(d.client);
+  for (const c of next.clients) if (c !== d.client) c.send(next.snapshot());
+}
+
 type Data = { authed: boolean; session: Session | null; client: Client };
 
 function authed(t: unknown) {
@@ -88,17 +101,13 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
   }
   if (m.type === "resume") {
     if (s.state.busy) return ws.send(JSON.stringify({ type: "error", message: "Stop the current turn first" }));
-    s.close();
-    sessions.delete(s.key);
-    panes[s.key] = { session: String(m.id), cwd: s.cwd, remote: s.wantRemote };
-    if (replay < 0) savePanes();
-    const next = open(s.key, s.cwd);
-    d.session = next;
-    for (const c of s.clients) if (c !== d.client) next.clients.add(c);
-    await next.load();
-    next.attach(d.client);
-    for (const c of next.clients) if (c !== d.client) c.send(next.snapshot());
-    return;
+    return reopen(d, s, String(m.id), s.cwd);
+  }
+  if (m.type === "cwd") {
+    if (s.state.session || s.n.items.length) return ws.send(JSON.stringify({ type: "error", message: "The folder can only change before the first message" }));
+    const cwd = String(m.cwd);
+    if (!existsSync(cwd)) return ws.send(JSON.stringify({ type: "error", message: `${cwd} doesn't exist on this machine` }));
+    return reopen(d, s, null, cwd);
   }
   switch (m.type) {
     case "prompt": return s.prompt(String(m.text ?? ""), Array.isArray(m.images) ? m.images : [], typeof m.id === "string" ? m.id : undefined);
