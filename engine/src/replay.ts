@@ -75,6 +75,8 @@ export class ReplaySession extends Session {
     m.error = null;
   }
 
+  protected override async warm() {}
+
   protected override start() {
     const lines = readFileSync(ReplaySession.fixture, "utf8").split("\n").filter(Boolean);
     const r = ++this.round;

@@ -88,13 +88,27 @@ export class Session {
     if (this.loaded) return;
     this.loaded = true;
     const id = this.state.session;
-    if (!id) return;
+    if (!id) {
+      if (!knownModels.length) this.warm();
+      return;
+    }
     this.title();
     try {
       for (const m of await getSessionMessages(id, { dir: this.cwd, includeSystemMessages: true })) this.n.feed({ ...m, isReplay: true });
     } catch (e) {
       this.n.notice("error", `Couldn't load the earlier conversation: ${e}`);
     }
+    this.warm();
+  }
+
+  // A reopened session (after an engine restart, say) would otherwise wait for its next message to start
+  // the CLI, and until then has no models, commands or context to show.
+  protected async warm() {
+    if (this.q) return;
+    this.start();
+    await this.loadCommands();
+    await this.usage();
+    this.mcp();
   }
 
   // Claude names a session (or /rename does) a moment after a turn; custom names win.
@@ -329,6 +343,7 @@ export class Session {
     try {
       const u = await this.q?.getContextUsage({ detail: "summary" });
       if (!u) return;
+      if (!this.state.model && u.model) this.n.setState({ model: u.model });
       this.n.setState({
         usage: { total: u.totalTokens, max: u.maxTokens, categories: u.categories.map(({ id, name, tokens, kind }) => ({ id, name, tokens, kind })) },
         context: { used: u.totalTokens, max: u.maxTokens },

@@ -11,7 +11,7 @@ const HOME = process.env.HOME!;
 const PORT = Number(process.env.HERDR_CHAT_PORT ?? 7777);
 const HOSTS = (process.env.HERDR_CHAT_HOSTS ?? "127.0.0.1").split(",").filter(Boolean);
 const TOKEN_FILE = `${HOME}/.config/herdr-chat/token`;
-const PANES_FILE = `${HOME}/.local/state/herdr-chat/panes.json`;
+const PANES_FILE = process.env.HERDR_CHAT_PANES ?? `${HOME}/.local/state/herdr-chat/panes.json`;
 
 const replay = process.argv.indexOf("--replay");
 if (replay >= 0) ReplaySession.fixture = process.argv[replay + 1]!;
