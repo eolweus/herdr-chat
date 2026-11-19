@@ -22,9 +22,13 @@ export class ReplaySession extends Session {
       { name: "commit", description: "Create a git commit", hint: "" },
     ];
     this.n.state.models = [
-      { value: "default", name: "Default (recommended)", description: "Opus 5.5 for complex work", efforts: ["low", "medium", "high", "xhigh", "max"] },
-      { value: "sonnet", name: "Sonnet", description: "Sonnet 5.5 for daily coding", efforts: ["low", "medium", "high"] },
-      { value: "haiku", name: "Haiku", description: "Haiku 5.5 for quick answers", efforts: [] },
+      { value: "default", name: "Default (recommended)", description: "Opus 5.5 for complex work", efforts: ["low", "medium", "high", "xhigh", "max"], resolved: "claude-opus-5-5", fast: true },
+      { value: "opus", name: "Opus 5.5", description: "For complex work and everyday tasks", efforts: ["low", "medium", "high", "xhigh", "max"], resolved: "claude-opus-5-5", fast: true },
+      { value: "fable", name: "Fable 5.2", description: "For your toughest challenges", efforts: ["low", "medium", "high", "xhigh", "max"], resolved: "claude-fable-5-2", fast: true },
+      { value: "sonnet", name: "Sonnet 5.5", description: "Most efficient for simpler tasks", efforts: ["low", "medium", "high", "xhigh", "max"], resolved: "claude-sonnet-5-5", fast: false },
+      { value: "haiku", name: "Haiku 5.5", description: "Fastest for quick answers", efforts: ["low", "medium", "high", "xhigh", "max"], resolved: "claude-haiku-5-5", fast: false },
+      { value: "claude-opus-4-8", name: "Opus 4.8", description: "Best for everyday, complex tasks", efforts: ["low", "medium", "high", "xhigh", "max"], resolved: "claude-opus-4-8", fast: true },
+      { value: "claude-haiku-4-5-20251001", name: "Haiku 4.5", description: "Fastest for quick answers", efforts: [], resolved: "claude-haiku-4-5-20251001", fast: false },
     ];
     await super.load();
   }

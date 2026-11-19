@@ -58,6 +58,7 @@ export default class HerdrChat extends View {
     this.expandAll = Boolean(p.expand);
     this.mono = settings().font_family;
     this.modelMenu = Boolean(p.models);
+    this.modelSub = typeof p.models === "string" ? p.models : null;
     this.mcpMenu = p.mcp ? { servers: null, busy: new Set() } : null;
     this.remoteMenu = Boolean(p.remote);
     this.remotePending = false;
@@ -691,6 +692,12 @@ export default class HerdrChat extends View {
   pickEffort(effort, cx) {
     this.send({ type: "set", effort });
     this.state = { ...this.state, effort };
+    cx.notify();
+  }
+
+  setFlag(name, value, cx) {
+    this.send({ type: "set", [name]: value });
+    this.state = { ...this.state, [name]: value };
     cx.notify();
   }
 

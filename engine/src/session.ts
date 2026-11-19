@@ -67,7 +67,7 @@ export class Session {
   protected pending = new Map<string, Pending>();
   private queued: { id: string; text: string; images: Image[] }[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private options: { permissionMode?: string; model?: string; effort?: string } = {};
+  private options: { permissionMode?: string; model?: string; effort?: string; flags?: Record<string, unknown> } = {};
   private loaded = false;
   handoff: Handoff | null = null;
 
@@ -193,6 +193,7 @@ export class Session {
       },
     });
     this.q = q;
+    if (this.options.flags) q.applyFlagSettings(this.options.flags as any).catch(() => {});
     (async () => {
       try {
         for await (const msg of q) this.receive(msg);
@@ -246,7 +247,7 @@ export class Session {
       if (!list) return;
       knownCommands = commandsOf(list);
       const models = await this.q?.supportedModels().catch(() => null);
-      if (models) knownModels = models.map((m) => ({ value: m.value, name: m.displayName, description: m.description, efforts: m.supportedEffortLevels ?? [] }));
+      if (models) knownModels = models.map((m) => ({ value: m.value, name: m.displayName, description: m.description, efforts: m.supportedEffortLevels ?? [], resolved: m.resolvedModel ?? m.value, fast: Boolean(m.supportsFastMode) }));
       this.n.setState({ commands: knownCommands, models: knownModels });
       this.schedule();
     } catch {}
@@ -402,7 +403,13 @@ export class Session {
     await this.q?.interrupt().catch(() => {});
   }
 
-  async set(s: { mode?: string; model?: string; effort?: string; worktree?: boolean }) {
+  // Flag settings reach a running CLI now and a later one at its start.
+  private async flag(settings: Record<string, unknown>) {
+    this.options.flags = { ...this.options.flags, ...settings };
+    await this.q?.applyFlagSettings(settings as any).catch(() => {});
+  }
+
+  async set(s: { mode?: string; model?: string; effort?: string; worktree?: boolean; ultracode?: boolean; fast?: boolean }) {
     if (s.mode) {
       this.options.permissionMode = s.mode;
       await this.q?.setPermissionMode(s.mode as any).catch(() => {});
@@ -415,8 +422,17 @@ export class Session {
     }
     if (s.effort) {
       this.options.effort = s.effort;
-      await this.q?.applyFlagSettings({ effortLevel: s.effort as any }).catch(() => {});
+      // Without the ultracode key, changing the level would turn ultracode off.
+      await this.flag({ effortLevel: s.effort, ultracode: this.state.ultracode });
       this.n.setState({ effort: s.effort });
+    }
+    if (typeof s.ultracode === "boolean") {
+      await this.flag({ ultracode: s.ultracode });
+      this.n.setState({ ultracode: s.ultracode });
+    }
+    if (typeof s.fast === "boolean") {
+      await this.flag({ fastMode: s.fast });
+      this.n.setState({ fast: s.fast });
     }
     if (typeof s.worktree === "boolean" && !this.q && !this.state.session) this.n.setState({ worktree: s.worktree });
     this.schedule();

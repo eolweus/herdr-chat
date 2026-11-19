@@ -11,7 +11,7 @@ export function commandsOf(list: Msg[] | undefined) {
 }
 
 export function newState(): State {
-  return { busy: false, status: null, mode: "default", model: "", context: { used: 0, max: 0 }, queue: [], session: null, usage: null, commands: [], models: [], mcp: [], remote: null, title: null, effort: null, worktree: false };
+  return { busy: false, status: null, mode: "default", model: "", context: { used: 0, max: 0 }, queue: [], session: null, usage: null, commands: [], models: [], mcp: [], remote: null, title: null, effort: null, worktree: false, ultracode: false, fast: false };
 }
 
 function textOf(content: unknown): string {
@@ -92,7 +92,11 @@ export class Normalizer {
   private system(msg: Msg) {
     switch (msg.subtype) {
       case "init":
-        return this.setState({ model: msg.model, mode: msg.permissionMode, session: msg.session_id });
+        return this.setState({
+          model: msg.model, mode: msg.permissionMode, session: msg.session_id,
+          ...(msg.effort !== undefined ? { effort: msg.effort } : {}),
+          ...(msg.fast_mode_state ? { fast: msg.fast_mode_state === "on" } : {}),
+        });
       case "status":
         return this.setState({ status: msg.status === "compacting" ? "Compacting" : null });
       case "commands_changed":

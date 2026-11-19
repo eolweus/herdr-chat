@@ -68,12 +68,14 @@ export type State = {
   effort: string | null;
   /** The next start makes a git worktree; only before the session's first message. */
   worktree: boolean;
+  ultracode: boolean;
+  fast: boolean;
 };
 
 export type Mcp = { name: string; label: string };
 export type McpServer = Mcp & { status: string; error: string | null; tools: number; scope: string | null };
 
-export type Model = { value: string; name: string; description: string; efforts: string[] };
+export type Model = { value: string; name: string; description: string; efforts: string[]; resolved: string; fast: boolean };
 
 export type Command = { name: string; description: string; hint: string };
 
