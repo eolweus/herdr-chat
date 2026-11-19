@@ -40,7 +40,7 @@ export function composer(view, t) {
     .when(Boolean(view.modelMenu) && s.models?.length > 0, (el) => el.child(modelList(view, t)))
     .when(Boolean(view.mcpMenu), (el) => el.child(mcpList(view, t)))
     .when(Boolean(view.remoteMenu), (el) => el.child(remoteCard(view, t)))
-    .child(v_flex().w_full().rounded(14).border_1().border_color(machineColor(view.machine) ? machineColor(view.machine) + (view.focusedInput ? "" : "66") : view.focusedInput ? t.accent : t.input).bg(t.surface)
+    .child(v_flex().w_full().rounded(14).border_1().border_color(machineColor(view.machine) ?? (view.focusedInput ? t.accent : t.input)).bg(t.surface)
       .when(view.attachments.length > 0, (el) => el.child(h_flex().gap(8).px(10).pt(10).flex_wrap()
         .children(view.attachments.map((a, i) => div().relative()
           .child(image(a.path).h(56).max_w(120).rounded(6))
