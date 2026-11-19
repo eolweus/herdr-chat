@@ -3,7 +3,7 @@
 
 import { div } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { panes, run, shared, spaces } from "herdr";
+import { exec, home, notify, panes, run, setShared, shared, spaces } from "herdr";
 
 export const HANDOFF = "#a970ff";
 
@@ -11,6 +11,28 @@ const live = () => shared("handoffs") ?? [];
 const color = (machine, t) => (shared("machine.colors") ?? {})[machine ?? "local"] ?? t.dim;
 const chip = (text, c) => div().flex_none().px(5).h(16).rounded(4).flex().items_center().bg(c + "26").text_color(c).text_size(10.5).font_semibold().child(text);
 const quoted = (s, flag) => s.match(new RegExp(`${flag}\\s+(?:"([^"]*)"|'([^']*)'|(\\S+))`))?.slice(1).find((x) => x !== undefined) ?? null;
+
+const closing = () => shared("handoffs.closing") ?? {};
+
+// The same signed close as `board close <id>`; the sidebar clears the mark once the session is gone.
+async function markDone(h) {
+  setShared("handoffs.closing", { ...closing(), [h.id]: Date.now() });
+  const r = await exec(`${home()}/dotfiles/bin/board`, ["close", h.id], { timeout: 60000 }).catch((e) => ({ code: -1, stderr: String(e?.message ?? e) }));
+  if (r.code === 0) return true;
+  const { [h.id]: _, ...rest } = closing();
+  setShared("handoffs.closing", rest);
+  notify({ title: "Couldn't close the handoff", body: (r.stderr || r.stdout || "").trim().slice(0, 300), level: "error" });
+  return false;
+}
+
+function doneButton(id, h, t, after) {
+  if (closing()[h.id]) return div().flex_none().text_size(12).text_color(t.dim).child(h.status === "working" ? "Closing after this turn…" : "Closing…");
+  return div().id(id).flex_none().px(8).h(22).rounded(6).flex().items_center().cursor_pointer()
+    .bg(HANDOFF + "26").text_color(HANDOFF).text_size(12).font_semibold().hover((s) => s.bg(HANDOFF + "44"))
+    .tooltip("Close this handoff's session once its current turn ends")
+    .on_click((_e, cx) => { cx.stop_propagation(); markDone(h).then((ok) => ok && after?.()); })
+    .child("✓ Mark done");
+}
 
 export const isHandoffPost = (item) => item.kind === "tool" && item.name === "Bash" && /(^|[\s/])board post\b/.test(item.detail ?? "");
 
@@ -57,6 +79,7 @@ export function handoffCard(item, t, view) {
       .child(chip(machine, h ? color(h.machine, t) : t.dim))
       .child(div().flex_1().min_w(0).truncate().text_size(13).text_color(t.foreground).child(title))
       .when(!pending && !failed, (el) => el.child(state(h, t)))
+      .when(Boolean(h), (el) => el.child(doneButton(`handoff-done-${item.id}`, h, t)))
       .when(Boolean(h), (el) => el.child(div().flex_none().text_size(12).text_color(t.dim).child("Open ›"))));
 }
 
@@ -72,6 +95,9 @@ export function handoffStrip(view, t) {
   const meta = view.handoff;
   if (!meta) return null;
   const h = live().find((x) => x.key === view.key && (x.machine ?? null) === (view.machine ?? null)) ?? null;
+  // Marked done here: once the session is gone, so is its tab.
+  if (view.leaving && h) view.seen = true;
+  if (view.leaving && view.seen && !h && view.pane) { view.leaving = false; run("pane.close", { pane: view.pane }); }
   const from = String(meta.from ?? "").split("/")[0] || "?";
   const sender = h && senderTitle(h);
   const back = h && (h.parent ?? (h.parentKey ? chatPane(h.parentKey) : null));
@@ -88,5 +114,6 @@ export function handoffStrip(view, t) {
     .child(div().flex_1())
     .child(div().flex_none().text_color(t.dim).child("running on"))
     .child(chip(h?.label ?? (view.machine ?? "this computer"), color(view.machine, t)))
-    .when(Boolean(h), (el) => el.child(state(h, t)));
+    .when(Boolean(h), (el) => el.child(state(h, t)))
+    .when(Boolean(h), (el) => el.child(doneButton("handoff-strip-done", h, t, () => { view.leaving = true; })));
 }
