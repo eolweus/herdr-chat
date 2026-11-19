@@ -214,7 +214,7 @@ export class Session {
         includePartialMessages: true,
         settingSources: ["user", "project", "local"],
         systemPrompt: { type: "preset", preset: "claude_code" },
-        extraArgs: { "replay-user-messages": null, ...(this.state.worktree && !this.state.session ? { worktree: null } : {}) },
+        extraArgs: { "replay-user-messages": null, ...(process.platform === "darwin" ? { chrome: null } : {}), ...(this.state.worktree && !this.state.session ? { worktree: null } : {}) },
         effort: this.options.effort as any,
         permissionMode: this.options.permissionMode as any,
         model: this.options.model,
