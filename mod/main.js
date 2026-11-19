@@ -322,6 +322,12 @@ export default class HerdrChat extends View {
   }
 
   async upsert(item, live) {
+    if (item.kind === "user" && this.local) {
+      // An engine older than the client ids sends its own id for the same message.
+      const mine = item.id !== this.local && this.byId.get(this.local);
+      if (mine) { this.items.splice(this.items.indexOf(mine), 1); this.byId.delete(this.local); }
+      this.local = null;
+    }
     const prev = this.byId.get(item.id);
     if (prev) this.items[this.items.indexOf(prev)] = item;
     else this.items.push(item);
@@ -444,6 +450,7 @@ export default class HerdrChat extends View {
     const images = this.attachments.map(({ type, data }) => ({ type, data }));
     // Shown right away; the engine's copy of the same id replaces it.
     if (!this.state.busy && !waiting) {
+      this.local = id;
       this.upsert({ id, kind: "user", text, images }, true);
       this.state = { ...this.state, busy: true };
     }
