@@ -8,7 +8,7 @@ const LANG = {
   py: "python", rs: "rust", yml: "yaml", toml: "yaml", jsonc: "json", md: "markdown", golang: "go",
 };
 
-const LINE = 18;
+const LINE = 20;
 
 export const language = (lang) => LANG[lang] ?? lang ?? "";
 
@@ -88,6 +88,14 @@ function runOutput(r, t, id, onDismiss) {
       .font_family(settings().font_family).text_size(12).text_color(t.muted).child(text)));
 }
 
+// The code editor always leaves at least half its height, or three rows, empty below the last line to
+// scroll into. Making it that much taller than its clipped box leaves nothing to scroll.
+function codeView(state, lines) {
+  const h = lines * LINE + 12;
+  return div().w_full().h(h).overflow_hidden().px(4).pt(6)
+    .child(div().w_full().h(2 * h + 3 * LINE).child(Editor.new(state).size_full()));
+}
+
 export function codeBlock(state, code, t, { label, maxLines = 40, onRun, runs, id } = {}) {
   const lines = Math.min(code.split("\n").length, maxLines);
   const run = onRun && SHELLS.has(label ?? "");
@@ -99,7 +107,7 @@ export function codeBlock(state, code, t, { label, maxLines = 40, onRun, runs, i
         .text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground)).tooltip("Run here · Shift-click to run in a terminal")
         .on_click((e, cx) => onRun(id, commandOf(label, code), e.modifiers.shift, cx))
         .child("▶").child(r ? "Run again" : "Run")))))
-    .child(div().w_full().h(lines * LINE + 14).px(4).py(6).child(Editor.new(state).size_full()))
+    .child(codeView(state, lines))
     .when(Boolean(r), (el) => el.child(runOutput(r, t, id, (cx) => onRun(id, null, false, cx))));
 }
 
