@@ -79,7 +79,11 @@ export default class HerdrChat extends View {
     this.folderInput.on("submit", (_e, cx) => this.chooseFolder(cx));
     this.input.on("submit", (e, cx) => this.enter(e, cx));
     this.input.on("paste_other", (_e, cx) => this.pasteImage(cx));
-    this.input.on("change", (_e, cx) => { this.commandAt = 0; cx.notify(); });
+    this.input.on("change", (_e, cx) => {
+      this.commandAt = 0;
+      if (this.slashToken()?.start !== this.dismissed) this.dismissed = null;
+      cx.notify();
+    });
     this.commandAt = 0;
     this.input.on("focus", (_e, cx) => { this.focusedInput = true; this.findPane(); cx.notify(); });
     this.input.on("blur", (_e, cx) => { this.focusedInput = false; cx.notify(); });
@@ -449,16 +453,27 @@ export default class HerdrChat extends View {
     if (e?.shift) return;
     const v = this.input.value();
     const at = this.input.selected_range().start;
-    if (v[at - 1] === "\n") this.input.set_value(v.slice(0, at - 1) + v.slice(at));
+    if (v[at - 1] === "\n") {
+      this.input.set_value(v.slice(0, at - 1) + v.slice(at));
+      this.input.set_selected_range({ start: at - 1, end: at - 1 });
+    }
+    // A picked command only fills in, so it can take arguments; the next Enter sends.
     const pick = this.commandMatches()[this.commandAt];
-    if (pick && !this.input.value().trim().includes(" ") && this.input.value().trim() !== `/${pick.name}`) return this.complete(pick, cx);
+    if (pick) return this.complete(pick, cx);
     this.submit(cx);
   }
 
+  // The "/word" being typed at the cursor, at the start or after a space.
+  slashToken() {
+    const at = this.input.selected_range().start;
+    const m = this.input.value().slice(0, at).match(/(?:^| )\/(\S*)$/);
+    return m ? { start: at - m[1].length - 1, end: at, q: m[1] } : null;
+  }
+
   commandMatches() {
-    const v = this.input.value();
-    if (!v.startsWith("/") || /\s/.test(v.trimEnd()) || v.includes("\n")) return [];
-    const q = v.slice(1).trim().toLowerCase();
+    const tok = this.slashToken();
+    if (!tok || tok.start === this.dismissed) return [];
+    const q = tok.q.toLowerCase();
     const list = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp"), { name: "mcp", description: "Manage MCP servers", hint: "" }];
     const starts = list.filter((c) => c.name.toLowerCase().startsWith(q));
     const contains = list.filter((c) => !c.name.toLowerCase().startsWith(q) && (c.name + " " + c.description).toLowerCase().includes(q));
@@ -471,7 +486,11 @@ export default class HerdrChat extends View {
   }
 
   complete(cmd, cx) {
-    this.setDraft(`/${cmd.name} `);
+    const tok = this.slashToken();
+    const v = this.input.value();
+    const head = (tok ? v.slice(0, tok.start) : "") + `/${cmd.name} `;
+    this.input.set_value(head + (tok ? v.slice(tok.end) : ""));
+    this.input.set_selected_range({ start: head.length, end: head.length });
     this.commandAt = 0;
     cx.notify();
   }
@@ -702,7 +721,7 @@ export default class HerdrChat extends View {
       this.commandAt = (this.commandAt + (e.keystroke === "down" ? 1 : cmds.length - 1)) % cmds.length;
       cx.notify();
     } else if (cmds.length && e.keystroke === "tab") this.complete(cmds[this.commandAt] ?? cmds[0], cx);
-    else if (cmds.length && e.keystroke === "escape") { this.input.set_value(""); cx.notify(); }
+    else if (cmds.length && e.keystroke === "escape") { this.dismissed = this.slashToken()?.start ?? null; cx.notify(); }
     else if (this.modelMenu && e.keystroke === "escape") { this.modelMenu = false; cx.notify(); }
     else if (this.mcpMenu && e.keystroke === "escape") { this.mcpMenu = null; cx.notify(); }
     else if (this.remoteMenu && e.keystroke === "escape") { this.remoteMenu = false; cx.notify(); }
