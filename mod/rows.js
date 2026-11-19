@@ -33,7 +33,7 @@ export function userRow(item, t, view) {
 }
 
 export function textRow(item, t, view) {
-  return row().py(8).child(markdown(item.id, item.text || " ", t, view.codes, { onRun: (code) => view.runCommand(code) }));
+  return row().py(8).child(markdown(item.id, item.text || " ", t, view.codes, { onRun: (id, code, terminal, cx) => view.runCommand(id, code, terminal, cx), runs: view.runs }));
 }
 
 export function thinkingRow(item, t, view) {

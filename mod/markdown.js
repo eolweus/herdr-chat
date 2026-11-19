@@ -72,26 +72,44 @@ export class CodeCache {
 
 const SHELLS = new Set(["bash", "sh", "shell", "zsh", "console"]);
 
-export function codeBlock(state, code, t, { label, maxLines = 40, onRun, id } = {}) {
+const commandOf = (label, code) => (label === "console"
+  ? code.split("\n").filter((l) => /^\s*\$ /.test(l)).map((l) => l.replace(/^\s*\$ /, "")).join("\n")
+  : code);
+
+function runOutput(r, t, id, onDismiss) {
+  const text = r.output.trimEnd();
+  return v_flex().w_full().border_t_1().border_color(t.border).px(10).py(6).gap(4)
+    .child(h_flex().gap(6).items_center().text_size(11).text_color(t.dim)
+      .child(r.status === "running" ? div().text_color(t.working).frames(["◐", "◓", "◑", "◒"], 120) : div().text_color(r.code === 0 ? t.done : t.blocked).child(r.code === 0 ? "✓" : "✕"))
+      .child(div().flex_1().child(r.status === "running" ? "Running…" : r.code === 0 ? "Done" : `Exit code ${r.code}`))
+      .when(r.status !== "running", (el) => el.child(div().id(`run-x-${id}`).px(4).rounded(4).cursor_pointer().hover((s) => s.bg(t.hover))
+        .on_click((_e, cx) => onDismiss(cx)).child("✕"))))
+    .when(Boolean(text), (el) => el.child(div().id(`run-out-${id}`).max_h(220).overflow_y_scrollbar()
+      .font_family(settings().font_family).text_size(12).text_color(t.muted).child(text)));
+}
+
+export function codeBlock(state, code, t, { label, maxLines = 40, onRun, runs, id } = {}) {
   const lines = Math.min(code.split("\n").length, maxLines);
   const run = onRun && SHELLS.has(label ?? "");
+  const r = run ? runs?.get(id) : null;
   return v_flex().w_full().rounded(8).border_1().border_color(t.border).bg(t.surface).overflow_hidden()
     .when(Boolean(label), (el) => el.child(h_flex().px(10).pt(6).items_center().text_size(11).text_color(t.dim)
       .child(div().flex_1().child(label))
       .when(run, (el) => el.child(h_flex().id(`run-${id}`).gap(4).px(6).py(1).rounded(5).items_center().cursor_pointer()
-        .text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground)).tooltip("Run in a terminal next to this chat")
-        .on_click(() => onRun(label === "console" ? code.split("\n").filter((l) => /^\s*\$ /.test(l)).map((l) => l.replace(/^\s*\$ /, "")).join("\n") : code))
-        .child("▶").child("Run")))))
-    .child(div().w_full().h(lines * LINE + 14).px(4).py(6).child(Editor.new(state).size_full()));
+        .text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground)).tooltip("Run here · Shift-click to run in a terminal")
+        .on_click((e, cx) => onRun(id, commandOf(label, code), e.modifiers.shift, cx))
+        .child("▶").child(r ? "Run again" : "Run")))))
+    .child(div().w_full().h(lines * LINE + 14).px(4).py(6).child(Editor.new(state).size_full()))
+    .when(Boolean(r), (el) => el.child(runOutput(r, t, id, (cx) => onRun(id, null, false, cx))));
 }
 
-export function markdown(id, text, t, codes, { size = 14, onRun } = {}) {
+export function markdown(id, text, t, codes, { size = 14, onRun, runs } = {}) {
   const parts = split(text);
   return v_flex().w_full().gap(10).children(parts.map((p, i) => {
     if (p.kind === "md") return TextView.markdown(`${id}:${i}`, p.text).selectable(true).text_size(size).w_full();
     const state = p.open ? null : codes.peek(`${id}:${i}`);
     if (!state) return TextView.markdown(`${id}:${i}`, "```" + p.lang + "\n" + p.code + "\n```").selectable(true).text_size(size).w_full();
-    return codeBlock(state, p.code, t, { label: p.lang, maxLines: 400, onRun, id: `${id}-${i}` });
+    return codeBlock(state, p.code, t, { label: p.lang, maxLines: 400, onRun, runs, id: `${id}-${i}` });
   }));
 }
 

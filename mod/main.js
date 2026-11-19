@@ -56,6 +56,7 @@ export default class HerdrChat extends View {
     this.otherInputs = new Map();
     this.images = new Map();
     this.originals = new Set();
+    this.runs = new Map();
     this.attachments = [];
     this.following = true;
     this.stick = true;
@@ -140,11 +141,27 @@ export default class HerdrChat extends View {
     return rel;
   }
 
-  // Runs a command from a reply in a new terminal beside the chat, left open afterwards.
-  runCommand(code) {
-    if (!code.trim()) return;
-    if (this.pane) run("pane.focus", { pane: this.pane });
-    run("terminal.open", { folder: this.cwd ?? undefined, place: "right", argv: ["sh", "-c", 'eval "$1"; exec "${SHELL:-sh}" -l', "sh", code] });
+  // A command from a reply runs out of sight with its output under the block; Shift opens a terminal
+  // beside the chat instead, left open afterwards. A null code dismisses the output.
+  runCommand(id, code, terminal, cx) {
+    if (code === null) return void (this.runs.delete(id), cx.notify());
+    if (!code.trim() || this.runs.get(id)?.status === "running") return;
+    if (terminal) {
+      if (this.pane) run("pane.focus", { pane: this.pane });
+      return run("terminal.open", { folder: this.cwd ?? undefined, place: "right", argv: ["sh", "-c", 'eval "$1"; exec "${SHELL:-sh}" -l', "sh", code] });
+    }
+    const r = { status: "running", output: "", code: null };
+    this.runs.set(id, r);
+    cx.notify();
+    cx.spawn(async (cx) => {
+      try {
+        const res = await exec("sh", ["-c", 'cd "$1" 2>/dev/null; exec "${SHELL:-sh}" -lc "$2" 2>&1', "sh", this.cwd ?? "", code], { on: this.machine, timeout: 300000 });
+        Object.assign(r, { status: "done", output: (res.stdout + res.stderr).slice(-6000), code: res.code });
+      } catch (e) {
+        Object.assign(r, { status: "done", output: String(e?.message ?? e), code: -1 });
+      }
+      cx.notify();
+    });
   }
 
   viewImages(paths, index) {
