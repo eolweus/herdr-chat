@@ -638,6 +638,11 @@ export default class HerdrChat extends View {
     cx.notify();
   }
 
+  sendNow(id, cx) {
+    this.send({ type: "send_now", id });
+    cx.notify();
+  }
+
   unqueue(id, cx) {
     this.send({ type: "unqueue", id });
     cx.notify();

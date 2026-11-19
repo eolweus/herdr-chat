@@ -172,6 +172,21 @@ export class Session {
     this.changed();
   }
 
+  // Stops the running turn; the turn's result then sends the queue's front, which this one now is.
+  async sendNow(id: string) {
+    const entry = this.queued.find((q) => q.id === id);
+    if (!entry) return;
+    this.queued = [entry, ...this.queued.filter((q) => q !== entry)];
+    this.changed();
+    if (!this.state.busy || !this.q) {
+      this.queued.shift();
+      this.send(entry);
+      return this.changed();
+    }
+    this.denyAll("Interrupted by the user");
+    await this.q.interrupt().catch(() => {});
+  }
+
   unqueue(id: string) {
     this.queued = this.queued.filter((q) => q.id !== id);
     this.changed();
