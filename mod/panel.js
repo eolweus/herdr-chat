@@ -2,6 +2,7 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { agents, exec, focused, home, panes, run, setShared, shared, theme } from "herdr";
 import { TerminalSession } from "./terminal.js";
+import { machineColor } from "./composer.js";
 
 const fmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1)}k` : String(n));
 
@@ -61,7 +62,8 @@ export class Panel {
 
     const env = section("Environment")
       .when(Boolean(a.terminal), (el) => el.child(row("square-pen", a.title ? `Terminal · ${a.title}` : "Claude Code in a terminal")))
-      .child(row(a.machine ? "server" : "monitor", a.machine ?? "This computer"))
+      .child(row(a.machine ? "server" : "monitor", a.machine ?? "This computer",
+        machineColor(a.machine) ? div().size(8).rounded(4).bg(machineColor(a.machine)) : null))
       .child(row("folder", a.folder ?? "No folder"))
       .when(Boolean(a.branch), (el) => el.child(row("git-branch", a.branch)))
       .when(Boolean(a.remote), (el) => el.child(row("monitor", "Remote Control on", div().id("remote-link").text_size(11.5).text_color(t.accent)

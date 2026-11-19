@@ -1,6 +1,6 @@
 import { div, image } from "gpui-kit";
 import { v_flex, h_flex, Textarea } from "gpui-base";
-import { exec } from "herdr";
+import { exec, shared } from "herdr";
 
 export const MODES = [
   ["default", "Ask before edits"],
@@ -9,6 +9,8 @@ export const MODES = [
   ["auto", "Auto mode"],
   ["bypassPermissions", "Bypass permissions"],
 ];
+
+export const machineColor = (m) => (shared("machine.colors") ?? {})[m ?? "local"] ?? null;
 
 const chip = (id, t) => h_flex().id(id).gap(6).px(8).py(3).rounded(6).items_center().text_size(11.5).text_color(t.muted)
   .cursor_pointer().hover((s) => s.bg(t.hover));
@@ -65,6 +67,10 @@ export function composer(view, t) {
         .on_click((_e, cx) => view.toggleRemoteMenu(cx))
         .when(Boolean(s.remote), (el) => el.child(div().size(6).rounded(3).bg(t.done)))
         .child(div().text_color(s.remote ? t.foreground : t.muted).child(view.remotePending ? "Connecting…" : s.remote ? "Remote on" : "Remote")))
+      .when(Boolean(machineColor(view.machine)), (el) => el.child(h_flex().gap(6).px(8).py(3).items_center().text_size(11.5)
+        .text_color(machineColor(view.machine)).tooltip(`Running on ${view.machine ?? "this computer"}`)
+        .child(div().size(6).rounded(3).bg(machineColor(view.machine)))
+        .child(div().child(view.machine ?? "this computer"))))
       .child(div().flex_1())
       .when(s.busy, (el) => el.child(h_flex().gap(6).px(6).items_center().text_size(11.5).text_color(t.working)
         .child(div().frames(["◐", "◓", "◑", "◒"], 120))
