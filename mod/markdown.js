@@ -1,5 +1,5 @@
 import { div } from "gpui-kit";
-import { v_flex, TextView, EditorState, Editor } from "gpui-base";
+import { v_flex, h_flex, TextView, EditorState, Editor } from "gpui-base";
 import { settings } from "herdr";
 
 const LANG = {
@@ -70,20 +70,28 @@ export class CodeCache {
   }
 }
 
-export function codeBlock(state, code, t, { label, maxLines = 40 } = {}) {
+const SHELLS = new Set(["bash", "sh", "shell", "zsh", "console"]);
+
+export function codeBlock(state, code, t, { label, maxLines = 40, onRun, id } = {}) {
   const lines = Math.min(code.split("\n").length, maxLines);
+  const run = onRun && SHELLS.has(label ?? "");
   return v_flex().w_full().rounded(8).border_1().border_color(t.border).bg(t.surface).overflow_hidden()
-    .when(Boolean(label), (el) => el.child(div().px(10).pt(6).text_size(11).text_color(t.dim).child(label)))
+    .when(Boolean(label), (el) => el.child(h_flex().px(10).pt(6).items_center().text_size(11).text_color(t.dim)
+      .child(div().flex_1().child(label))
+      .when(run, (el) => el.child(h_flex().id(`run-${id}`).gap(4).px(6).py(1).rounded(5).items_center().cursor_pointer()
+        .text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground)).tooltip("Run in a terminal next to this chat")
+        .on_click(() => onRun(label === "console" ? code.split("\n").filter((l) => /^\s*\$ /.test(l)).map((l) => l.replace(/^\s*\$ /, "")).join("\n") : code))
+        .child("▶").child("Run")))))
     .child(div().w_full().h(lines * LINE + 14).px(4).py(6).child(Editor.new(state).size_full()));
 }
 
-export function markdown(id, text, t, codes, { size = 14 } = {}) {
+export function markdown(id, text, t, codes, { size = 14, onRun } = {}) {
   const parts = split(text);
   return v_flex().w_full().gap(10).children(parts.map((p, i) => {
     if (p.kind === "md") return TextView.markdown(`${id}:${i}`, p.text).selectable(true).text_size(size).w_full();
     const state = p.open ? null : codes.peek(`${id}:${i}`);
     if (!state) return TextView.markdown(`${id}:${i}`, "```" + p.lang + "\n" + p.code + "\n```").selectable(true).text_size(size).w_full();
-    return codeBlock(state, p.code, t, { label: p.lang, maxLines: 400 });
+    return codeBlock(state, p.code, t, { label: p.lang, maxLines: 400, onRun, id: `${id}-${i}` });
   }));
 }
 

@@ -140,6 +140,13 @@ export default class HerdrChat extends View {
     return rel;
   }
 
+  // Runs a command from a reply in a new terminal beside the chat, left open afterwards.
+  runCommand(code) {
+    if (!code.trim()) return;
+    if (this.pane) run("pane.focus", { pane: this.pane });
+    run("terminal.open", { folder: this.cwd ?? undefined, place: "right", argv: ["sh", "-c", 'eval "$1"; exec "${SHELL:-sh}" -l', "sh", code] });
+  }
+
   viewImages(paths, index) {
     openOverlay({ mod: "herdr-chat", props: { viewer: { paths, index } }, kind: "dialog", frame: "none", width: 0.92, height: 0.92 });
   }
