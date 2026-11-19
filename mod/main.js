@@ -683,6 +683,24 @@ export default class HerdrChat extends View {
     cx.notify();
   }
 
+  pickEffort(effort, cx) {
+    this.send({ type: "set", effort });
+    this.state = { ...this.state, effort };
+    cx.notify();
+  }
+
+  // A worktree can only be chosen before the session starts, in a git repo.
+  canWorktree() {
+    return Boolean(this.branch) && !this.state.session && !this.state.busy && !this.items.length;
+  }
+
+  toggleWorktree(cx) {
+    const worktree = !this.state.worktree;
+    this.send({ type: "set", worktree });
+    this.state = { ...this.state, worktree };
+    cx.notify();
+  }
+
   cycleMode(cx) {
     const next = CYCLE[(CYCLE.indexOf(this.state.mode) + 1) % CYCLE.length];
     this.send({ type: "set", mode: next });

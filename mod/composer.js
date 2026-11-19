@@ -6,6 +6,15 @@ import { exec, shared } from "herdr";
 export const RUN_TAG = "<!-- herdr-chat:run -->";
 export const isRunOutput = (i) => i.kind === "user" && (i.text?.startsWith(RUN_TAG) || i.text?.startsWith("I ran:\n```sh\n"));
 
+const EFFORTS = { low: "Low", medium: "Medium", high: "High", xhigh: "Extra", max: "Max" };
+
+// The session reports a full model id; the menu lists aliases like "opus".
+export function efforts(s) {
+  const ms = s.models ?? [];
+  const m = ms.find((x) => x.value === s.model) ?? ms.find((x) => x.value !== "default" && s.model?.includes(x.value)) ?? ms.find((x) => x.value === "default");
+  return m?.efforts?.length ? m.efforts : m ? [] : Object.keys(EFFORTS);
+}
+
 export const MODES = [
   ["default", "Ask before edits"],
   ["acceptEdits", "Edit automatically"],
@@ -66,7 +75,13 @@ export function composer(view, t) {
       .child(chip("mode", t).tooltip("Shift-Tab to change").on_click((_e, cx) => view.cycleMode(cx))
         .child(div().text_color(s.mode === "bypassPermissions" ? t.blocked : s.mode === "plan" ? t.accent : t.muted).child(mode)))
       .when(Boolean(s.model) || s.models?.length > 0, (el) => el.child(chip("model", t).on_click((_e, cx) => view.toggleModels(cx))
-        .child(div().child(s.model || "Model")).child(div().text_size(10).child(view.modelMenu ? "⌄" : "›"))))
+        .child(div().child(s.model || "Model"))
+        .when(Boolean(s.effort) && efforts(s).includes(s.effort), (el) => el.child(div().text_color(t.dim).child(EFFORTS[s.effort] ?? s.effort)))
+        .child(div().text_size(10).child(view.modelMenu ? "⌄" : "›"))))
+      .when(view.canWorktree(), (el) => el.child(chip("worktree", t).tooltip("Start this chat in a new git worktree")
+        .on_click((_e, cx) => view.toggleWorktree(cx))
+        .child(div().text_color(s.worktree ? t.foreground : t.dim).child(s.worktree ? "☑" : "☐"))
+        .child(div().text_color(s.worktree ? t.foreground : t.muted).child("Worktree"))))
       .child(chip("remote", t).tooltip(s.remote ? "Remote Control is on" : "Continue this chat from claude.ai or your phone")
         .on_click((_e, cx) => view.toggleRemoteMenu(cx))
         .when(Boolean(s.remote), (el) => el.child(div().size(6).rounded(3).bg(t.done)))
@@ -99,7 +114,12 @@ function modelList(view, t) {
     .children(view.state.models.map((m) => h_flex().id(`model-${m.value}`).gap(10).px(10).py(6).rounded(8).items_baseline().cursor_pointer()
       .hover((s) => s.bg(t.hover)).on_click((_e, cx) => view.pickModel(m.value, cx))
       .child(div().flex_none().text_size(13).font_semibold().text_color(t.foreground).child(m.name))
-      .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.muted).child(m.description))));
+      .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.muted).child(m.description))))
+    .when(efforts(view.state).length > 0, (el) => el.child(h_flex().gap(4).px(10).pt(6).pb(4).mt(2).border_t_1().border_color(t.border).items_center()
+      .child(div().flex_none().w(52).text_size(12).text_color(t.dim).child("Effort"))
+      .children(efforts(view.state).map((e) => div().id(`effort-${e}`).px(8).py(2).rounded(6).cursor_pointer().text_size(12)
+        .bg(view.state.effort === e ? t.selected : t.surface).text_color(view.state.effort === e ? t.foreground : t.muted)
+        .hover((s) => s.bg(t.hover)).on_click((_e, cx) => view.pickEffort(e, cx)).child(EFFORTS[e] ?? e)))));
 }
 
 const MCP_ORDER = ["needs-auth", "failed", "pending", "connected", "disabled"];
