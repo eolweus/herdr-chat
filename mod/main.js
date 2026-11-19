@@ -232,21 +232,27 @@ export default class HerdrChat extends View {
     if (!this.pane || this.other) return;
     const status = this.pending() ? "blocked" : this.state.busy ? "working" : this.unseen ? "done" : null;
     const first = this.items.find((i) => i.kind === "user" && !i.text?.startsWith("This session is being continued"))?.text?.split("\n")[0] ?? null;
-    const json = JSON.stringify({ folder: tilde(this.cwd, this.home), cwd: this.cwd, status, title: this.state.title ?? (first && first.slice(0, 80)), named: Boolean(this.state.title) });
+    const title = this.state.title ?? (first && first.slice(0, 80));
+    this.nameTab(this.state.title ?? first, first);
+    const json = JSON.stringify({ folder: tilde(this.cwd, this.home), cwd: this.cwd, status, title, named: Boolean(this.state.title) });
     if (json === this.paneShared) return;
     this.paneShared = json;
     setShared(`herdr-chat:pane:${this.pane}`, JSON.parse(json));
   }
 
-  // Names an unnamed tab that holds only this chat after its first message, like the desktop app's titles.
-  nameTab(text) {
-    if (this.named || !this.pane || !text) return;
-    this.named = true;
+  // A tab holding only this chat follows the session's title (its first message until Claude or /rename names it),
+  // like the sidebar. A name the person gave the tab stays: only unnamed tabs and names this chat set are replaced.
+  nameTab(text, first) {
+    if (!this.pane || !text) return;
+    const short = (s) => { const n = (s ?? "").split("\n")[0].trim(); return n.length > 40 ? `${n.slice(0, 39)}…` : n; };
+    const name = short(text);
+    if (!name || name === this.tabName) return;
     const me = panes().find((x) => x.pane === this.pane);
     const tab = spaces().flatMap((sp) => sp.tabs).find((tb) => tb.id === me?.tab);
-    if (!tab || tab.named || tab.panes !== 1) return;
-    const name = text.split("\n")[0].trim();
-    run("tab.rename", { id: tab.id, name: name.length > 40 ? `${name.slice(0, 39)}…` : name });
+    if (!tab || tab.panes !== 1) return;
+    if (tab.named && tab.name !== this.tabName && tab.name !== short(first) && tab.name !== name) return;
+    this.tabName = name;
+    if (tab.name !== name) run("tab.rename", { id: tab.id, name });
   }
 
   async endpoint() {
@@ -389,7 +395,6 @@ export default class HerdrChat extends View {
     if (item.images?.length) await this.saveImages(item);
     if (live && !prev && (item.kind === "permission" || item.kind === "question") && item.state === "pending") this.alert(item);
     if (item.kind === "permission" || item.kind === "question") this.publishPane();
-    if (item.kind === "user" && !prev && this.items.filter((i) => i.kind === "user").length === 1) this.nameTab(item.text);
     if (this.following) this.stick = true;
     if (live && item.kind === "tool" && item.status === "ok" && item.path) this.publish();
   }
