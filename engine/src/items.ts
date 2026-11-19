@@ -64,12 +64,16 @@ export type State = {
   mcp: Mcp[];
   remote: string | null;
   title: string | null;
+  /** null: the model's default. */
+  effort: string | null;
+  /** The next start makes a git worktree; only before the session's first message. */
+  worktree: boolean;
 };
 
 export type Mcp = { name: string; label: string };
 export type McpServer = Mcp & { status: string; error: string | null; tools: number; scope: string | null };
 
-export type Model = { value: string; name: string; description: string };
+export type Model = { value: string; name: string; description: string; efforts: string[] };
 
 export type Command = { name: string; description: string; hint: string };
 

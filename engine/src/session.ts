@@ -67,7 +67,7 @@ export class Session {
   protected pending = new Map<string, Pending>();
   private queued: { id: string; text: string; images: Image[] }[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private options: { permissionMode?: string; model?: string } = {};
+  private options: { permissionMode?: string; model?: string; effort?: string } = {};
   private loaded = false;
   handoff: Handoff | null = null;
 
@@ -77,6 +77,7 @@ export class Session {
     this.n.state.commands = knownCommands;
     this.n.state.models = knownModels;
     this.n.state.mode = defaultMode();
+    this.n.state.effort = userSettings().effortLevel ?? null;
   }
 
   get state(): State {
@@ -184,7 +185,8 @@ export class Session {
         includePartialMessages: true,
         settingSources: ["user", "project", "local"],
         systemPrompt: { type: "preset", preset: "claude_code" },
-        extraArgs: { "replay-user-messages": null },
+        extraArgs: { "replay-user-messages": null, ...(this.state.worktree && !this.state.session ? { worktree: null } : {}) },
+        effort: this.options.effort as any,
         permissionMode: this.options.permissionMode as any,
         model: this.options.model,
         canUseTool: (tool, input, opts) => this.ask(tool, input, opts.toolUseID, opts.suggestions),
@@ -214,6 +216,12 @@ export class Session {
     }
     const before = this.state.session;
     this.n.feed(msg);
+    // --worktree moves the session into the new worktree; later resumes must look for it there.
+    if (msg.type === "system" && msg.subtype === "init" && msg.cwd && msg.cwd !== this.cwd) {
+      this.cwd = msg.cwd;
+      this.n.setState({ worktree: false });
+      this.broadcast(this.snapshot());
+    }
     if (msg.type === "system" && msg.subtype === "init") {
       this.loadCommands();
       this.mcp();
@@ -238,7 +246,7 @@ export class Session {
       if (!list) return;
       knownCommands = commandsOf(list);
       const models = await this.q?.supportedModels().catch(() => null);
-      if (models) knownModels = models.map((m) => ({ value: m.value, name: m.displayName, description: m.description }));
+      if (models) knownModels = models.map((m) => ({ value: m.value, name: m.displayName, description: m.description, efforts: m.supportedEffortLevels ?? [] }));
       this.n.setState({ commands: knownCommands, models: knownModels });
       this.schedule();
     } catch {}
@@ -394,7 +402,7 @@ export class Session {
     await this.q?.interrupt().catch(() => {});
   }
 
-  async set(s: { mode?: string; model?: string }) {
+  async set(s: { mode?: string; model?: string; effort?: string; worktree?: boolean }) {
     if (s.mode) {
       this.options.permissionMode = s.mode;
       await this.q?.setPermissionMode(s.mode as any).catch(() => {});
@@ -405,6 +413,12 @@ export class Session {
       await this.q?.setModel(s.model).catch(() => {});
       this.n.setState({ model: s.model });
     }
+    if (s.effort) {
+      this.options.effort = s.effort;
+      await this.q?.applyFlagSettings({ effortLevel: s.effort as any }).catch(() => {});
+      this.n.setState({ effort: s.effort });
+    }
+    if (typeof s.worktree === "boolean" && !this.q && !this.state.session) this.n.setState({ worktree: s.worktree });
     this.schedule();
   }
 
