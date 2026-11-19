@@ -474,7 +474,7 @@ export default class HerdrChat extends View {
     const tok = this.slashToken();
     if (!tok || tok.start === this.dismissed) return [];
     const q = tok.q.toLowerCase();
-    const list = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp"), { name: "mcp", description: "Manage MCP servers", hint: "" }];
+    const list = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp"), { name: "mcp", description: "Manage MCP servers", hint: "" }, { name: "restart-engine", description: "Restart this machine's chat engine (stops running turns)", hint: "" }];
     const starts = list.filter((c) => c.name.toLowerCase().startsWith(q));
     const contains = list.filter((c) => !c.name.toLowerCase().startsWith(q) && (c.name + " " + c.description).toLowerCase().includes(q));
     return [...starts, ...contains].slice(0, 8);
@@ -501,6 +501,10 @@ export default class HerdrChat extends View {
       this.input.set_value("");
       return this.openMcp(cx);
     }
+    if (text === "/restart-engine") {
+      this.input.set_value("");
+      return this.restartEngine(cx);
+    }
     if (!this.ws || (!text && !this.attachments.length)) return;
     const waiting = this.pending();
     if (waiting && text && !this.attachments.length) {
@@ -511,6 +515,16 @@ export default class HerdrChat extends View {
     this.input.set_value("");
     this.attachments = [];
     cx.notify();
+  }
+
+  // Chats reconnect by themselves and the engine resumes their sessions.
+  restartEngine(cx) {
+    const sh = 'if command -v launchctl >/dev/null; then launchctl kickstart -k "gui/$(id -u)/com.herdr-chat.engine"; else systemctl --user restart herdr-chat; fi';
+    cx.spawn(async (cx) => {
+      const r = await exec("sh", ["-c", sh], { on: this.machine }).catch((e) => ({ code: -1, stderr: String(e?.message ?? e) }));
+      if (r.code) this.error = `restart failed: ${r.stderr || r.stdout}`.trim();
+      cx.notify();
+    });
   }
 
   prompt(text, images) {
