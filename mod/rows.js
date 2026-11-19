@@ -82,7 +82,7 @@ export function toolRow(item, t, view, children) {
         const path = view.imagePath(item.id, i);
         return path
           ? div().id(`timg-${item.id}-${i}`).w(240).h(150).rounded(8).overflow_hidden().border_1().border_color(t.border).cursor_pointer()
-            .on_click(() => view.viewImages([path], 0)).child(image(path).size_full())
+            .on_click(() => view.viewTools([{ id: item.id, i, path }], 0)).child(image(path).size_full())
           : div();
       }))))));
 }
@@ -203,7 +203,7 @@ export function groupRow(group, t, view, children) {
     .when(!running, (el) => el.child(div().flex_1()))
     .when(failed > 0, (el) => el.child(div().flex_none().text_color(t.blocked).child(`${failed} failed`)))
     .children(thumbs.slice(0, 4).map((th, n) => div().id(`thumb-${group.id}-${n}`).flex_none().ml(4).w(40).h(26).rounded(4).border_1().border_color(t.border).overflow_hidden()
-      .cursor_pointer().on_click((_e, cx) => { cx.stop_propagation(); view.viewImages(thumbs.map((x) => x.path), n); })
+      .cursor_pointer().on_click((_e, cx) => { cx.stop_propagation(); view.viewTools(thumbs, n); })
       .child(image(th.path).size_full())));
   return v_flex().w_full().px(22).py(5)
     .child(line)

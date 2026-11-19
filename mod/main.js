@@ -51,6 +51,7 @@ export default class HerdrChat extends View {
     this.picks = new Map();
     this.otherInputs = new Map();
     this.images = new Map();
+    this.originals = new Set();
     this.attachments = [];
     this.following = true;
     this.stick = true;
@@ -114,6 +115,25 @@ export default class HerdrChat extends View {
     if (json === this.published) return;
     this.published = json;
     setShared(`herdr-chat:info:${this.pane}`, data);
+  }
+
+  // Read hands Claude a downscaled copy; the viewer shows the file itself while it's still there.
+  async viewTools(thumbs, index) {
+    const full = await Promise.all(thumbs.map((x) => this.original(x).catch(() => null)));
+    this.viewImages(thumbs.map((x, i) => full[i] ?? x.path), index);
+  }
+
+  async original({ id, i }) {
+    const tool = this.byId.get(id);
+    const ext = tool?.path?.split(".").pop()?.toLowerCase();
+    if (i || tool?.name !== "Read" || !MIME[ext]) return null;
+    const rel = `${DATA}/img/${safe(id)}-full.${ext}`;
+    if (this.originals.has(rel)) return rel;
+    const r = await exec("sh", ["-c", 'base64 < "$1"', "sh", tool.path], { on: this.machine });
+    if (r.code !== 0) return null;
+    await fs.writeFile(`${appHome()}/${rel}`, Buffer.from(r.stdout.replace(/\s/g, ""), "base64"));
+    this.originals.add(rel);
+    return rel;
   }
 
   viewImages(paths, index) {
