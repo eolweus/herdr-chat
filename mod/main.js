@@ -84,6 +84,12 @@ export default class HerdrChat extends View {
     cx.timer.after(150, () => this.input.focus());
     cx.timer.after(400, () => this.findPane());
     if (checking()) return;
+    // Herdr only sends "focus" for pane.go, not for clicks, tab switches or pane.focus.
+    cx.timer.every(200, () => {
+      const shown = this.visible();
+      if (shown && !this.shown) this.input.focus();
+      this.shown = shown;
+    });
     cx.spawn(async (cx) => this.connect(cx));
     cx.spawn(async (cx) => {
       for (;;) {
