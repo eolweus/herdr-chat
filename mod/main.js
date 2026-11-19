@@ -12,6 +12,7 @@ import { FileView } from "./fileview.js";
 import { permissionCard, questionCard } from "./cards.js";
 import { composer, RUN_TAG, isRunOutput } from "./composer.js";
 import { handoffCard, handoffStrip, isHandoffPost } from "./handoff.js";
+import { moveChat } from "./move.js";
 
 const PROTOCOL = 1;
 const PORT = 7777;
@@ -485,7 +486,7 @@ export default class HerdrChat extends View {
     const tok = this.slashToken();
     if (!tok || tok.start === this.dismissed) return [];
     const q = tok.q.toLowerCase();
-    const list = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp"), { name: "mcp", description: "Manage MCP servers", hint: "" }, { name: "restart-engine", description: "Restart a machine's chat engine, copying the code there first if it's remote (stops running turns)", hint: "[machine]" }];
+    const list = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp"), { name: "mcp", description: "Manage MCP servers", hint: "" }, { name: "restart-engine", description: "Restart a machine's chat engine, copying the code there first if it's remote (stops running turns)", hint: "[machine]" }, { name: "move", description: "Move this chat to another machine: the conversation continues there and this pane closes", hint: "<machine> [folder] [--force]" }];
     const starts = list.filter((c) => c.name.toLowerCase().startsWith(q));
     const contains = list.filter((c) => !c.name.toLowerCase().startsWith(q) && (c.name + " " + c.description).toLowerCase().includes(q));
     return [...starts, ...contains].slice(0, 8);
@@ -511,6 +512,15 @@ export default class HerdrChat extends View {
     if (text === "/mcp") {
       this.input.set_value("");
       return this.openMcp(cx);
+    }
+    const move = text.match(/^\/move(?:\s+(.*))?$/);
+    if (move) {
+      this.input.set_value("");
+      cx.spawn(async (cx) => {
+        try { await moveChat(this, move[1] ?? ""); } catch (e) { notify({ title: "Couldn't move this chat", body: String(e?.message ?? e), level: "error" }); }
+        cx.notify();
+      });
+      return;
     }
     const restart = text.match(/^\/restart-engine(?:\s+(\S+))?$/);
     if (restart) {
