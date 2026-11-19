@@ -3,7 +3,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { dirname } from "node:path";
 import type { ServerWebSocket } from "bun";
 import { listSessions } from "@anthropic-ai/claude-agent-sdk";
-import { Session, userSettings, type Client } from "./src/session";
+import { Session, userSettings, type Client, type Handoff } from "./src/session";
 import { ReplaySession } from "./src/replay";
 
 const PROTOCOL = 1;
@@ -27,7 +27,7 @@ function token(): string {
 
 const TOKEN = Buffer.from(token());
 
-type Pane = { session: string | null; cwd: string; remote?: boolean };
+type Pane = { session: string | null; cwd: string; remote?: boolean; handoff?: Handoff; closed?: string };
 const panes: Record<string, Pane> = existsSync(PANES_FILE) ? JSON.parse(readFileSync(PANES_FILE, "utf8")) : {};
 function savePanes() {
   mkdirSync(dirname(PANES_FILE), { recursive: true });
@@ -36,15 +36,19 @@ function savePanes() {
 
 const sessions = new Map<string, Session>();
 
+function remember(s: Session) {
+  const was = panes[s.key];
+  panes[s.key] = { session: s.state.session, cwd: s.cwd, remote: s.wantRemote, handoff: s.handoff ?? undefined, closed: was?.closed };
+  if (replay < 0) savePanes();
+}
+
 function open(key: string, cwd: string): Session {
   const live = sessions.get(key);
   if (live) return live;
   const known = replay < 0 ? panes[key] : undefined;
   const Kind = replay >= 0 ? ReplaySession : Session;
-  const s = new Kind(key, known?.cwd ?? cwd, known?.session ?? null, (s) => {
-    panes[s.key] = { session: s.state.session, cwd: s.cwd, remote: s.wantRemote };
-    if (replay < 0) savePanes();
-  });
+  const s = new Kind(key, known?.cwd ?? cwd, known?.session ?? null, remember);
+  s.handoff = known?.handoff ?? null;
   sessions.set(key, s);
   if (replay < 0 && (known?.remote ?? userSettings().remoteControlAtStartup === true) && existsSync(s.cwd)) s.remote(true).catch(() => {});
   return s;
@@ -53,7 +57,7 @@ function open(key: string, cwd: string): Session {
 async function reopen(d: Data, s: Session, session: string | null, cwd: string) {
   s.close();
   sessions.delete(s.key);
-  panes[s.key] = { session, cwd, remote: s.wantRemote };
+  panes[s.key] = { ...panes[s.key], session, cwd, remote: s.wantRemote };
   if (replay < 0) savePanes();
   const next = open(s.key, cwd);
   d.session = next;
@@ -124,8 +128,7 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
     case "remote":
       try {
         await s.remote(Boolean(m.enabled));
-        panes[s.key] = { session: s.state.session, cwd: s.cwd, remote: s.wantRemote };
-        savePanes();
+        remember(s);
       } catch (e: any) {
         ws.send(JSON.stringify({ type: "error", message: `Remote Control: ${e?.message ?? e}` }));
       }
@@ -142,11 +145,76 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
   }
 }
 
+// For `board` and the sidebar: handoff sessions run here with no pane attached.
+const json = (o: unknown, status = 200) => Response.json(o, { status });
+
+function handoffs() {
+  return Object.entries(panes).filter(([, p]) => p.handoff && !p.closed).map(([key, p]) => {
+    const s = sessions.get(key);
+    return {
+      key, cwd: p.cwd, session: p.session, ...p.handoff!,
+      status: s?.activity ?? "idle", title: p.handoff!.title, name: s?.state.title ?? null,
+    };
+  });
+}
+
+async function api(req: Request, path: string): Promise<Response> {
+  if (!authed(req.headers.get("authorization")?.replace(/^Bearer /, ""))) return json({ error: "unauthorized" }, 401);
+  if (req.method === "GET" && path === "/api/handoffs") return json({ handoffs: handoffs() });
+  const url = new URL(req.url);
+  if (req.method === "GET" && path === "/api/status") {
+    const key = url.searchParams.get("key") ?? "";
+    const s = sessions.get(key);
+    const p = panes[key];
+    if (!s && !p) return json({ exists: false });
+    return json({ exists: true, live: Boolean(s), closed: p?.closed ?? null, status: s?.activity ?? "idle" });
+  }
+  if (req.method !== "POST") return json({ error: "not found" }, 404);
+  const b = (await req.json().catch(() => ({}))) as Record<string, any>;
+  const key = String(b.key ?? "");
+  if (!key) return json({ error: "key needed" }, 400);
+  if (path === "/api/handoff") {
+    const cwd = String(b.cwd || HOME);
+    if (!existsSync(cwd)) return json({ error: `${cwd} doesn't exist on this machine` }, 400);
+    const s = open(key, cwd);
+    await s.load();
+    s.handoff = { id: String(b.id), title: b.title ? String(b.title) : null, from: String(b.from ?? ""), result: null };
+    delete panes[key]?.closed;
+    remember(s);
+    if (b.mode) await s.set({ mode: String(b.mode) });
+    if (b.text) s.prompt(String(b.text), []);
+    return json({ key });
+  }
+  const s = sessions.get(key) ?? (panes[key] && !panes[key]!.closed ? open(key, panes[key]!.cwd) : undefined);
+  if (!s) return json({ error: `no session ${key}` }, 404);
+  if (path === "/api/prompt") {
+    await s.load();
+    s.prompt(String(b.text ?? ""), []);
+    return json({ ok: true });
+  }
+  if (path === "/api/result") {
+    if (s.handoff) s.handoff.result = b.result === "failed" ? "failed" : "done";
+    remember(s);
+    return json({ ok: true });
+  }
+  if (path === "/api/close") {
+    s.close();
+    sessions.delete(key);
+    for (const c of s.clients) c.send({ type: "error", message: "This handoff was closed" });
+    panes[key] = { ...panes[key]!, closed: new Date().toISOString() };
+    if (replay < 0) savePanes();
+    return json({ ok: true });
+  }
+  return json({ error: "not found" }, 404);
+}
+
 for (const hostname of HOSTS) {
   Bun.serve<Data>({
     hostname,
     port: PORT,
     fetch(req, server) {
+      const path = new URL(req.url).pathname;
+      if (path.startsWith("/api/")) return api(req, path).catch((e) => json({ error: String(e) }, 500));
       if (server.upgrade(req, { data: { authed: false, session: null, client: null as unknown as Client } })) return;
       return new Response("herdr-chat engine\n");
     },

@@ -7,6 +7,8 @@ import { describe } from "./tools";
 
 export type Client = { send(o: unknown): void };
 
+export type Handoff = { id: string; title: string | null; from: string; result?: "done" | "failed" | null };
+
 export type Answer = {
   item: string;
   decision?: "once" | "session" | "deny";
@@ -67,6 +69,7 @@ export class Session {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private options: { permissionMode?: string; model?: string } = {};
   private loaded = false;
+  handoff: Handoff | null = null;
 
   constructor(public key: string, public cwd: string, sessionId: string | null, private onSession: (s: Session) => void) {
     this.n = new Normalizer(cwd);
@@ -103,7 +106,11 @@ export class Session {
   }
 
   snapshot() {
-    return { type: "snapshot", items: this.n.items, state: this.state, cwd: this.cwd };
+    return { type: "snapshot", items: this.n.items, state: this.state, cwd: this.cwd, handoff: this.handoff };
+  }
+
+  get activity(): "blocked" | "working" | "idle" {
+    return this.pending.size ? "blocked" : this.state.busy || this.queued.length ? "working" : "idle";
   }
 
   attach(c: Client) {
@@ -171,6 +178,7 @@ export class Session {
       prompt: this.box.iter,
       options: {
         cwd: this.cwd,
+        env: { ...process.env, HERDR_CHAT_KEY: this.key },
         resume: this.state.session ?? undefined,
         pathToClaudeCodeExecutable: CLAUDE,
         includePartialMessages: true,
