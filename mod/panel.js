@@ -1,16 +1,26 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { exec, run, setShared, shared, theme } from "herdr";
+import { exec, focused, panes, run, setShared, shared, theme } from "herdr";
 
 const fmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1)}k` : String(n));
 
 const COLORS = { messages: "ansi4", mcp_tools: "ansi1", system_tools: "ansi2", skills: "ansi3", custom_agents: "ansi5", memory_files: "ansi6" };
 
-// The side panel shows whichever chat was focused last; chats publish themselves to shared "herdr-chat:active".
+// Chats publish themselves to shared "herdr-chat:info:<pane>"; the panel follows the focused one,
+// else the last one it showed in the focused tab.
 export class Panel {
+  current() {
+    const f = focused();
+    const chats = panes().filter((p) => p.mod === "herdr-chat" && p.tab === f?.tab).map((p) => p.pane);
+    const pick = chats.includes(f?.pane) ? f.pane : chats.includes(this.last) ? this.last : chats[0];
+    if (pick) this.last = pick;
+    return pick ? shared(`herdr-chat:info:${pick}`) : null;
+  }
+
   render() {
     const t = theme();
-    const a = shared("herdr-chat:active");
+    const a = this.current();
+    const target = (cmd) => { setShared("herdr-chat:target", a.key); run(cmd); };
     const section = (title) => v_flex().w_full().gap(8).px(16).py(14).border_b_1().border_color(t.border)
       .child(div().text_size(12.5).font_semibold().text_color(t.foreground).child(title));
     const row = (icon, text, extra) => h_flex().gap(10).items_center().min_w(0).text_size(12.5)
@@ -18,7 +28,10 @@ export class Panel {
       .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(text))
       .when(Boolean(extra), (el) => el.child(extra));
     const root = v_flex().id("chat-panel").size_full().bg(t.background).text_color(t.foreground).overflow_y_scrollbar();
-    if (!a) return root.child(div().p(16).text_size(12.5).text_color(t.dim).child("Focus a Claude chat to see its details here."));
+    if (!a) return root.child(v_flex().size_full().items_center().justify_center().gap(6).p(16)
+      .child(svg("icons/claude.svg").size(22).text_color(t.dim))
+      .child(div().text_size(12.5).text_color(t.muted).child("No session"))
+      .child(div().text_size(12).text_color(t.dim).text_center().child("Open a Claude chat in this tab to see its details here.")));
 
     const env = section("Environment")
       .child(row(a.machine ? "server" : "monitor", a.machine ?? "This computer"))
@@ -51,7 +64,7 @@ export class Panel {
       .child(h_flex().items_center().pt(4)
         .child(div().flex_1().text_size(12).text_color(t.dim).child(max && buffer ? `${fmt(Math.max(0, max - buffer - total))} until auto-compact` : ""))
         .child(div().id("compact").px(10).py(4).rounded(7).bg(t.raised).border_1().border_color(t.border).text_size(12)
-          .cursor_pointer().hover((s) => s.bg(t.hover)).on_click(() => run("herdr-chat.compact")).child("Compact session")));
+          .cursor_pointer().hover((s) => s.bg(t.hover)).on_click(() => target("herdr-chat.compact")).child("Compact session")));
 
     const outputs = section("Outputs")
       .when(!a.outputs?.length, (el) => el.child(div().text_size(12).text_color(t.dim).child("Files Claude creates or edits show up here.")))
@@ -70,7 +83,7 @@ export class Panel {
         .on_click(() => { setShared("herdr-chat:signin", { key: a.key, server: m.name }); run("herdr-chat.signin"); })
         .child("Sign in"))))
       .child(div().id("mcp-manage").text_size(11.5).text_color(t.dim).cursor_pointer().hover((s) => s.text_color(t.foreground))
-        .on_click(() => run("herdr-chat.mcp")).child("Manage all servers…")) : null;
+        .on_click(() => target("herdr-chat.mcp")).child("Manage all servers…")) : null;
 
     const todos = a.todos?.length ? section("Tasks").children(a.todos.map((td) => h_flex().gap(8).text_size(12.5)
       .child(div().w(16).text_color(td.status === "completed" ? t.done : td.status === "in_progress" ? t.working : t.dim)

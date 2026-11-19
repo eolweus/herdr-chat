@@ -63,7 +63,7 @@ export default class HerdrChat extends View {
     this.input.on("paste_other", (_e, cx) => this.pasteImage(cx));
     this.input.on("change", (_e, cx) => { this.commandAt = 0; cx.notify(); });
     this.commandAt = 0;
-    this.input.on("focus", (_e, cx) => { this.focusedInput = true; this.findPane(); this.publish(true); cx.notify(); });
+    this.input.on("focus", (_e, cx) => { this.focusedInput = true; this.findPane(); cx.notify(); });
     this.input.on("blur", (_e, cx) => { this.focusedInput = false; cx.notify(); });
     this.handle = cx.focus_handle();
     this.input.focus();
@@ -84,7 +84,7 @@ export default class HerdrChat extends View {
   }
 
   active() {
-    return shared("herdr-chat:active")?.key === this.key;
+    return shared("herdr-chat:target") === this.key;
   }
 
   outputs() {
@@ -102,9 +102,9 @@ export default class HerdrChat extends View {
     return [...files.values()].reverse();
   }
 
-  // Feeds the side panel; only the chat focused last writes, and only when something it shows changed.
-  publish(force) {
-    if (!this.key || (!force && !this.active())) return;
+  // Feeds the side panel, which shows the chat in the focused pane or tab.
+  publish() {
+    if (!this.key || !this.pane) return;
     const s = this.state;
     const data = {
       key: this.key, pane: this.pane, machine: this.machine, folder: tilde(this.cwd, this.home), branch: this.branch ?? null,
@@ -113,7 +113,7 @@ export default class HerdrChat extends View {
     const json = JSON.stringify(data);
     if (json === this.published) return;
     this.published = json;
-    setShared("herdr-chat:active", data);
+    setShared(`herdr-chat:info:${this.pane}`, data);
   }
 
   viewImages(paths, index) {
@@ -142,6 +142,7 @@ export default class HerdrChat extends View {
   }
 
   async close() {
+    if (this.pane && !this.other) { setShared(`herdr-chat:info:${this.pane}`, null); setShared(`herdr-chat:pane:${this.pane}`, null); }
     await this.ws?.close().catch(() => {});
   }
 
@@ -151,6 +152,7 @@ export default class HerdrChat extends View {
     if (f && panes().find((x) => x.pane === f)?.mod === "herdr-chat") this.pane = f;
     if (this.visible()) this.unseen = false;
     this.publishPane();
+    this.publish();
   }
 
   // Herdr's pane header can't see into a mod pane, so the header clone reads this.
@@ -195,7 +197,7 @@ export default class HerdrChat extends View {
     await fs.mkdir(`${appHome()}/${DATA}/img`, { recursive: true }).catch(() => {});
     this.home = this.machine ? null : home();
     exec("sh", ["-c", `printf '%s\\n' "$HOME"; git -C '${(this.cwd ?? "").replace(/'/g, "'\\''")}' branch --show-current 2>/dev/null`], { on: this.machine })
-      .then((r) => { const [h, b] = r.stdout.split("\n"); this.home = h || this.home; this.branch = b || null; this.publish(false); cx.notify(); })
+      .then((r) => { const [h, b] = r.stdout.split("\n"); this.home = h || this.home; this.branch = b || null; this.publish(); cx.notify(); })
       .catch(() => {});
     let delay = 1000;
     for (;;) {
@@ -256,7 +258,7 @@ export default class HerdrChat extends View {
     if (this.mcpMenu && (!this.mcpMenu.servers || JSON.stringify(next.mcp) !== JSON.stringify(this.state.mcp))) this.send({ type: "mcp_list" });
     this.state = next;
     if (was && !next.busy && !this.visible()) this.unseen = true;
-    this.publish(false);
+    this.publish();
     this.publishPane();
     if (was && !next.busy && !this.visible()) {
       notify({ title: "Claude finished", body: tilde(this.cwd, this.home), level: "success", action: this.focusAction() });
@@ -281,7 +283,7 @@ export default class HerdrChat extends View {
     if (item.kind === "permission" || item.kind === "question") this.publishPane();
     if (item.kind === "user" && !prev && this.items.filter((i) => i.kind === "user").length === 1) this.nameTab(item.text);
     if (this.following) this.stick = true;
-    if (live && item.kind === "tool" && item.status === "ok" && item.path) this.publish(false);
+    if (live && item.kind === "tool" && item.status === "ok" && item.path) this.publish();
   }
 
   detailLang(tool) {
