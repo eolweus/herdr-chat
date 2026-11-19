@@ -1,26 +1,52 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { exec, focused, panes, run, setShared, shared, theme } from "herdr";
+import { agents, exec, focused, home, panes, run, setShared, shared, theme } from "herdr";
+import { TerminalSession } from "./terminal.js";
 
 const fmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1)}k` : String(n));
 
 const COLORS = { messages: "ansi4", mcp_tools: "ansi1", system_tools: "ansi2", skills: "ansi3", custom_agents: "ansi5", memory_files: "ansi6" };
 
-// Chats publish themselves to shared "herdr-chat:info:<pane>"; the panel follows the focused one,
-// else the last one it showed in the focused tab.
+// Chats publish themselves to shared "herdr-chat:info:<pane>"; Claude Code terminals are read from
+// their transcript. The panel follows the focused one, else the last one it showed in the focused tab.
 export class Panel {
+  constructor(cx) {
+    this.cx = cx;
+    this.terms = new Map();
+    cx.timer.every(3000, () => this.poll());
+  }
+
   current() {
     const f = focused();
     const chats = panes().filter((p) => p.mod === "herdr-chat" && p.tab === f?.tab).map((p) => p.pane);
-    const pick = chats.includes(f?.pane) ? f.pane : chats.includes(this.last) ? this.last : chats[0];
-    if (pick) this.last = pick;
-    return pick ? shared(`herdr-chat:info:${pick}`) : null;
+    const tuis = agents().filter((a) => a.app === "claude-code" && a.tab === f?.tab);
+    const all = [...chats, ...tuis.map((a) => a.pane)];
+    const pick = all.includes(f?.pane) ? f.pane : all.includes(this.last) ? this.last : all[0];
+    if (pick !== this.last) { this.last = pick; this.watch = null; }
+    if (!pick) return null;
+    const tui = tuis.find((a) => a.pane === pick);
+    if (!tui) return shared(`herdr-chat:info:${pick}`);
+    if (!this.terms.has(tui.address)) this.terms.set(tui.address, new TerminalSession(tui.address));
+    const term = this.terms.get(tui.address);
+    if (this.watch !== term) { this.watch = term; this.poll(); }
+    return term.data;
+  }
+
+  async poll() {
+    const term = this.watch;
+    if (!term || this.busy) return;
+    this.busy = true;
+    const h = term.machine ? null : home();
+    try { await term.refresh((p) => (h && p?.startsWith(h) ? `~${p.slice(h.length)}` : p ?? "")); } catch {}
+    this.busy = false;
+    this.cx.notify();
   }
 
   render() {
     const t = theme();
     const a = this.current();
     const target = (cmd) => { setShared("herdr-chat:target", a.key); run(cmd); };
+    const compact = () => (a.terminal ? this.terms.get(a.terminal)?.compact() : target("herdr-chat.compact"));
     const section = (title) => v_flex().w_full().gap(8).px(16).py(14).border_b_1().border_color(t.border)
       .child(div().text_size(12.5).font_semibold().text_color(t.foreground).child(title));
     const row = (icon, text, extra) => h_flex().gap(10).items_center().min_w(0).text_size(12.5)
@@ -34,6 +60,7 @@ export class Panel {
       .child(div().text_size(12).text_color(t.dim).text_center().child("Open a Claude chat in this tab to see its details here.")));
 
     const env = section("Environment")
+      .when(Boolean(a.terminal), (el) => el.child(row("square-pen", a.title ? `Terminal · ${a.title}` : "Claude Code in a terminal")))
       .child(row(a.machine ? "server" : "monitor", a.machine ?? "This computer"))
       .child(row("folder", a.folder ?? "No folder"))
       .when(Boolean(a.branch), (el) => el.child(row("git-branch", a.branch)))
@@ -49,7 +76,7 @@ export class Panel {
     const buffer = u?.categories.find((c) => c.kind === "buffer")?.tokens ?? 0;
     const color = (c) => t[COLORS[c.id] ?? "dim"] ?? t.dim;
     const ctx = section("Context")
-      .child(h_flex().text_size(12.5).child(div().flex_1().child(max ? `${pct}% used` : "Not measured yet"))
+      .child(h_flex().text_size(12.5).child(div().flex_1().child(max ? `${pct}% used` : total ? `${fmt(total)} tokens` : "Not measured yet"))
         .when(Boolean(max), (el) => el.child(div().text_color(t.dim).child(`${fmt(total)} / ${fmt(max)}`))))
       .when(Boolean(max), (el) => el.child(h_flex().w_full().h(6).rounded(3).bg(t.raised).overflow_hidden()
         .children(used.length
@@ -64,7 +91,7 @@ export class Panel {
       .child(h_flex().items_center().pt(4)
         .child(div().flex_1().text_size(12).text_color(t.dim).child(max && buffer ? `${fmt(Math.max(0, max - buffer - total))} until auto-compact` : ""))
         .child(div().id("compact").px(10).py(4).rounded(7).bg(t.raised).border_1().border_color(t.border).text_size(12)
-          .cursor_pointer().hover((s) => s.bg(t.hover)).on_click(() => target("herdr-chat.compact")).child("Compact session")));
+          .cursor_pointer().hover((s) => s.bg(t.hover)).on_click(compact).child("Compact session")));
 
     const outputs = section("Outputs")
       .when(!a.outputs?.length, (el) => el.child(div().text_size(12).text_color(t.dim).child("Files Claude creates or edits show up here.")))

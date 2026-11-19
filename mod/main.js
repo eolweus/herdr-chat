@@ -30,7 +30,7 @@ export default class HerdrChat extends View {
   init(_props, cx) {
     const p = props() ?? {};
     if (p.viewer) return void (this.other = new Viewer(p, cx));
-    if (p.panel) return void (this.other = new Panel());
+    if (p.panel) return void (this.other = new Panel(cx));
     if (p.file) return void (this.other = new FileView(p, cx));
     this.key = p.key ?? null;
     this.machine = p.machine || null;
