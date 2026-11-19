@@ -159,7 +159,7 @@ export default class HerdrChat extends View {
     return rel;
   }
 
-  // A command from a reply runs out of sight with its output under the block; Shift opens a terminal
+  // A command from a reply runs out of sight with its output under the block, then goes to Claude; Shift opens a terminal
   // beside the chat instead, left open afterwards. A null code dismisses the output.
   runCommand(id, code, terminal, cx) {
     if (code === null) return void (this.runs.delete(id), cx.notify());
@@ -178,6 +178,8 @@ export default class HerdrChat extends View {
       } catch (e) {
         Object.assign(r, { status: "done", output: String(e?.message ?? e), code: -1 });
       }
+      const fence = "```";
+      if (this.ws) this.prompt(`I ran:\n${fence}sh\n${code.trim()}\n${fence}\nOutput${r.code ? ` (exit ${r.code})` : ""}:\n${fence}\n${r.output.trimEnd() || "(no output)"}\n${fence}`, []);
       cx.notify();
     });
   }
@@ -486,20 +488,23 @@ export default class HerdrChat extends View {
       if (waiting.kind === "permission") this.answer({ item: waiting.id, decision: "deny", message: text }, cx);
       else this.answer({ item: waiting.id, answers: null, message: `The user replied instead of picking: ${text}` }, cx);
     }
+    this.prompt(text, this.attachments.map(({ type, data }) => ({ type, data })));
+    this.input.set_value("");
+    this.attachments = [];
+    cx.notify();
+  }
+
+  prompt(text, images) {
     const id = uuid();
-    const images = this.attachments.map(({ type, data }) => ({ type, data }));
     // Shown right away; the engine's copy of the same id replaces it.
-    if (!this.state.busy && !waiting) {
+    if (!this.state.busy && !this.pending()) {
       this.local = id;
       this.upsert({ id, kind: "user", text, images }, true);
       this.state = { ...this.state, busy: true };
     }
     this.send({ type: "prompt", id, text, images });
-    this.input.set_value("");
-    this.attachments = [];
     this.following = true;
     this.stick = true;
-    cx.notify();
   }
 
   answer(a, cx) {
