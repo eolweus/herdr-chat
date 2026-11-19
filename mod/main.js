@@ -23,6 +23,10 @@ const ago = (ms) => {
   const m = Math.round((Date.now() - ms) / 60000);
   return m < 1 ? "now" : m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`;
 };
+const uuid = () => "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+  const r = Math.floor(Math.random() * 16);
+  return (c === "x" ? r : 8 + (r % 4)).toString(16);
+});
 const safe = (s) => s.replace(/[^A-Za-z0-9_-]/g, "_");
 const tilde = (path, h) => (h && path?.startsWith(h) ? `~${path.slice(h.length)}` : path ?? "");
 
@@ -404,7 +408,14 @@ export default class HerdrChat extends View {
       if (waiting.kind === "permission") this.answer({ item: waiting.id, decision: "deny", message: text }, cx);
       else this.answer({ item: waiting.id, answers: null, message: `The user replied instead of picking: ${text}` }, cx);
     }
-    this.send({ type: "prompt", text, images: this.attachments.map(({ type, data }) => ({ type, data })) });
+    const id = uuid();
+    const images = this.attachments.map(({ type, data }) => ({ type, data }));
+    // Shown right away; the engine's copy of the same id replaces it.
+    if (!this.state.busy && !waiting) {
+      this.upsert({ id, kind: "user", text, images }, true);
+      this.state = { ...this.state, busy: true };
+    }
+    this.send({ type: "prompt", id, text, images });
     this.input.set_value("");
     this.attachments = [];
     this.following = true;

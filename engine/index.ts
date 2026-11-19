@@ -101,7 +101,7 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
     return;
   }
   switch (m.type) {
-    case "prompt": return s.prompt(String(m.text ?? ""), Array.isArray(m.images) ? m.images : []);
+    case "prompt": return s.prompt(String(m.text ?? ""), Array.isArray(m.images) ? m.images : [], typeof m.id === "string" ? m.id : undefined);
     case "unqueue": return s.unqueue(String(m.id));
     case "interrupt": return s.interrupt();
     case "answer": return s.answer(m as any);

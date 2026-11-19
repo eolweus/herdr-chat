@@ -36,6 +36,7 @@ export function userSettings(): Record<string, any> {
 }
 
 const defaultMode = (): string => userSettings().permissions?.defaultMode ?? "default";
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const CLAUDE = Bun.which("claude") ?? `${process.env.HOME}/.local/bin/claude`;
 const RECORD = process.env.HERDR_CHAT_RECORD;
 
@@ -142,8 +143,8 @@ export class Session {
     this.schedule();
   }
 
-  prompt(text: string, images: Image[]) {
-    const entry = { id: randomUUID(), text, images };
+  prompt(text: string, images: Image[], id?: string) {
+    const entry = { id: id && UUID.test(id) && !this.n.get(id) ? id : randomUUID(), text, images };
     if (this.state.busy) this.queued.push(entry);
     else this.send(entry);
     this.changed();
