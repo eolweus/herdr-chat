@@ -592,8 +592,22 @@ export default class HerdrChat extends View {
     cx.stop_propagation();
   }
 
+  // GPUI doesn't report the scroll offset, so the distance from the bottom is tracked from wheel moves.
   wheel(e, cx) {
-    if (e.delta.y > 0 && this.following) { this.following = false; cx.notify(); }
+    const max = Math.max(0, (this.contentH ?? 0) + 18 - (this.viewH ?? 0));
+    if (this.following) {
+      if (e.delta.y <= 0 || !max) return;
+      this.following = false;
+      this.fromBottom = 0;
+    }
+    this.fromBottom = Math.min(max, Math.max(0, this.fromBottom + e.delta.y));
+    if (this.fromBottom < 4) this.following = true;
+    cx.notify();
+  }
+
+  grew(h) {
+    if (!this.following && this.contentH) this.fromBottom += h - this.contentH;
+    this.contentH = h;
   }
 
   jump(cx) {
@@ -660,13 +674,15 @@ export default class HerdrChat extends View {
     if (this.expandAll) for (const i of this.items) this.expanded.add(i.id);
     const shown = this.blocks(this.items.filter((i) => !(i.kind === "tool" && i.parent && this.byId.has(i.parent))));
     if (this.stick && shown.length) {
-      this.scroll.scroll_to_item(shown.length);
+      this.scroll.scroll_to_item(1);
       this.stick = false;
     }
     const transcript = v_flex().id("transcript").flex_1().min_h(0).overflow_y_scrollbar().track_scroll(this.scroll).pt(10)
       .on_scroll_wheel((e, cx) => this.wheel(e, cx))
-      .items_center()
-      .children(shown.map((i) => this.renderItem(i, t, children).max_w(880)))
+      .on_size_change((size) => { this.viewH = size.height; })
+      .child(v_flex().id("transcript-content").w_full().items_center()
+        .on_size_change((size) => this.grew(size.height))
+        .children(shown.map((i) => this.renderItem(i, t, children).max_w(880))))
       .child(div().h(8));
     return v_flex().id("root").track_focus(this.handle).size_full().bg(t.background).text_color(t.foreground)
       .on_key_down((e, cx) => this.key(e, cx))
