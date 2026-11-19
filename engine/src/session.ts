@@ -70,6 +70,8 @@ export class Session {
   private options: { permissionMode?: string; model?: string; effort?: string; flags?: Record<string, unknown> } = {};
   private loaded = false;
   handoff: Handoff | null = null;
+  // Told to Claude with the next message, e.g. that the session moved machines.
+  preamble: string | null = null;
 
   constructor(public key: string, public cwd: string, sessionId: string | null, private onSession: (s: Session) => void) {
     this.n = new Normalizer(cwd);
@@ -195,9 +197,11 @@ export class Session {
   protected send({ id, text, images }: { id: string; text: string; images: Image[] }) {
     this.n.upsert({ id, kind: "user", text, images });
     this.n.setState({ busy: true });
+    const said = this.preamble ? `${this.preamble}\n\n${text}` : text;
+    if (this.preamble) { this.preamble = null; this.onSession(this); }
     const content = [
       ...images.map((i) => ({ type: "image" as const, source: { type: "base64" as const, media_type: i.type as "image/png", data: i.data } })),
-      ...(text ? [{ type: "text" as const, text }] : []),
+      ...(said ? [{ type: "text" as const, text: said }] : []),
     ];
     this.box.push({ type: "user", message: { role: "user", content }, parent_tool_use_id: null, uuid: id as `${string}-${string}-${string}-${string}-${string}` });
     if (!this.q) this.start();

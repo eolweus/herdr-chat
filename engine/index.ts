@@ -27,7 +27,7 @@ function token(): string {
 
 const TOKEN = Buffer.from(token());
 
-type Pane = { session: string | null; cwd: string; remote?: boolean; handoff?: Handoff; closed?: string };
+type Pane = { session: string | null; cwd: string; remote?: boolean; handoff?: Handoff; closed?: string; preamble?: string };
 const panes: Record<string, Pane> = existsSync(PANES_FILE) ? JSON.parse(readFileSync(PANES_FILE, "utf8")) : {};
 function savePanes() {
   mkdirSync(dirname(PANES_FILE), { recursive: true });
@@ -38,7 +38,7 @@ const sessions = new Map<string, Session>();
 
 function remember(s: Session) {
   const was = panes[s.key];
-  panes[s.key] = { session: s.state.session, cwd: s.cwd, remote: s.wantRemote, handoff: s.handoff ?? undefined, closed: was?.closed };
+  panes[s.key] = { session: s.state.session, cwd: s.cwd, remote: s.wantRemote, handoff: s.handoff ?? undefined, closed: was?.closed, preamble: s.preamble ?? undefined };
   if (replay < 0) savePanes();
 }
 
@@ -49,6 +49,7 @@ function open(key: string, cwd: string): Session {
   const Kind = replay >= 0 ? ReplaySession : Session;
   const s = new Kind(key, known?.cwd ?? cwd, known?.session ?? null, remember);
   s.handoff = known?.handoff ?? null;
+  s.preamble = known?.preamble ?? null;
   sessions.set(key, s);
   if (replay < 0 && (known?.remote ?? userSettings().remoteControlAtStartup === true) && existsSync(s.cwd)) s.remote(true).catch(() => {});
   return s;
@@ -186,6 +187,19 @@ async function api(req: Request, path: string): Promise<Response> {
     if (b.text) s.prompt(String(b.text), []);
     return json({ key });
   }
+  // A session copied here from another machine (/move): resume it under a new key.
+  if (path === "/api/adopt") {
+    const cwd = String(b.cwd || "");
+    if (!existsSync(cwd)) return json({ error: `${cwd} doesn't exist on this machine` }, 400);
+    if (sessions.has(key) || panes[key]) return json({ error: `${key} is already in use` }, 409);
+    panes[key] = { session: String(b.session), cwd, preamble: b.preamble ? String(b.preamble) : undefined };
+    if (replay < 0) savePanes();
+    const s = open(key, cwd);
+    await s.load();
+    if (b.mode) await s.set({ mode: String(b.mode) });
+    if (b.model) await s.set({ model: String(b.model) });
+    return json({ key, items: s.n.items.length });
+  }
   const s = sessions.get(key) ?? (panes[key] && !panes[key]!.closed ? open(key, panes[key]!.cwd) : undefined);
   if (!s) return json({ error: `no session ${key}` }, 404);
   if (path === "/api/prompt") {
@@ -201,7 +215,7 @@ async function api(req: Request, path: string): Promise<Response> {
   if (path === "/api/close") {
     s.close();
     sessions.delete(key);
-    for (const c of s.clients) c.send({ type: "error", message: "This handoff was closed" });
+    for (const c of s.clients) c.send({ type: "error", message: "This session was closed" });
     panes[key] = { ...panes[key]!, closed: new Date().toISOString() };
     if (replay < 0) savePanes();
     return json({ ok: true });
