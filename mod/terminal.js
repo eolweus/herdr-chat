@@ -16,6 +16,11 @@ grep '"type":"file-history-snapshot"' "$f" | tail -1
 echo
 tail -c 300000 "$f"`;
 
+// The SDK's breakdown, scaled to the window the TUI itself reports through the statusline cache.
+const CONTEXT = `cd "$HOME/projects/herdr-chat/engine" && "$HOME/.bun/bin/bun" context.ts "$1" "$2"
+echo
+cat "$HOME/.cache/claude-context/$1.json" 2>/dev/null`;
+
 const parse = (l) => { try { return JSON.parse(l); } catch { return null; } };
 const modelName = (m) => m?.replace(/^claude-([a-z]+)-(\d+)-(\d+).*/, (_, n, a, b) => `${n[0].toUpperCase()}${n.slice(1)} ${a}.${b}`) ?? "";
 
@@ -57,10 +62,34 @@ export class TerminalSession {
       if (e?.type === "permission-mode") d.mode = MODES[e.permissionMode] ?? e.permissionMode;
       const u = e?.type === "assistant" && !e.isSidechain ? e.message?.usage : null;
       if (!u) continue;
-      d.context = { used: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0), max: 0 };
+      d.context = { used: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0), max: this.max ?? 0 };
       d.model = modelName(e.message.model);
       d.branch = e.gitBranch && e.gitBranch !== "HEAD" ? e.gitBranch : null;
     }
+    if (d.context.used && Date.now() - (this.ctxAt ?? 0) > 60000) {
+      this.ctxAt = Date.now();
+      await this.breakdown(info.sessionId, info.cwd);
+    }
+    this.apply();
+  }
+
+  async breakdown(session, cwd) {
+    const r = await exec("sh", ["-c", CONTEXT, "sh", session, cwd], { on: this.machine, timeout: 40000 });
+    const [sdk, line] = r.stdout.split("\n").map(parse);
+    if (!sdk?.categories) return;
+    this.sdk = sdk;
+    this.max = line?.context_window?.context_window_size ?? sdk.max;
+  }
+
+  // Messages take whatever the real usage leaves after the fixed parts, since the SDK only estimates them.
+  apply() {
+    const d = this.data;
+    if (!this.sdk || !d.context.used) return;
+    const used = d.context.used;
+    const fixed = this.sdk.categories.filter((c) => c.kind === "used" && c.id !== "messages").reduce((n, c) => n + c.tokens, 0);
+    const categories = this.sdk.categories.map((c) => (c.id === "messages" ? { ...c, tokens: Math.max(0, used - fixed) } : c));
+    d.usage = { total: used, max: this.max, categories };
+    d.context = { used, max: this.max };
   }
 
   compact() {
