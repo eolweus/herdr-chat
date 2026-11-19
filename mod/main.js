@@ -10,7 +10,7 @@ import { Viewer } from "./viewer.js";
 import { Panel } from "./panel.js";
 import { FileView } from "./fileview.js";
 import { permissionCard, questionCard } from "./cards.js";
-import { composer } from "./composer.js";
+import { composer, RUN_TAG, isRunOutput } from "./composer.js";
 
 const PROTOCOL = 1;
 const PORT = 7777;
@@ -183,7 +183,7 @@ export default class HerdrChat extends View {
         Object.assign(r, { status: "done", output: String(e?.message ?? e), code: -1 });
       }
       const fence = "```";
-      if (this.ws) this.prompt(`I ran:\n${fence}sh\n${code.trim()}\n${fence}\nOutput${r.code ? ` (exit ${r.code})` : ""}:\n${fence}\n${r.output.trimEnd() || "(no output)"}\n${fence}`, []);
+      if (this.ws) this.prompt(`${RUN_TAG}\nI ran:\n${fence}sh\n${code.trim()}\n${fence}\nOutput${r.code ? ` (exit ${r.code})` : ""}:\n${fence}\n${r.output.trimEnd() || "(no output)"}\n${fence}`, []);
       cx.notify();
     });
   }
@@ -231,7 +231,7 @@ export default class HerdrChat extends View {
   publishPane() {
     if (!this.pane || this.other) return;
     const status = this.pending() ? "blocked" : this.state.busy ? "working" : this.unseen ? "done" : null;
-    const first = this.items.find((i) => i.kind === "user" && !i.text?.startsWith("This session is being continued"))?.text?.split("\n")[0] ?? null;
+    const first = this.items.find((i) => i.kind === "user" && !isRunOutput(i) && !i.text?.startsWith("This session is being continued"))?.text?.split("\n")[0] ?? null;
     const title = this.state.title ?? (first && first.slice(0, 80));
     this.nameTab(this.state.title ?? first, first);
     const json = JSON.stringify({ folder: tilde(this.cwd, this.home), cwd: this.cwd, status, title, named: Boolean(this.state.title) });
@@ -857,7 +857,7 @@ export default class HerdrChat extends View {
     const children = new Map();
     for (const i of this.items) if (i.kind === "tool" && i.parent) children.set(i.parent, [...(children.get(i.parent) ?? []), i]);
     if (this.expandAll) for (const i of this.items) this.expanded.add(i.id);
-    const shown = this.blocks(this.items.filter((i) => !(i.kind === "tool" && i.parent && this.byId.has(i.parent))));
+    const shown = this.blocks(this.items.filter((i) => !isRunOutput(i) && !(i.kind === "tool" && i.parent && this.byId.has(i.parent))));
     if (this.stick && shown.length) {
       this.scroll.scroll_to_item(1);
       this.stick = false;

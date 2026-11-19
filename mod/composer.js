@@ -2,6 +2,10 @@ import { div, image } from "gpui-kit";
 import { v_flex, h_flex, Textarea } from "gpui-base";
 import { exec, shared } from "herdr";
 
+// Run output goes to Claude as a message, but it already shows under its block, so the chat hides it.
+export const RUN_TAG = "<!-- herdr-chat:run -->";
+export const isRunOutput = (i) => i.kind === "user" && (i.text?.startsWith(RUN_TAG) || i.text?.startsWith("I ran:\n```sh\n"));
+
 export const MODES = [
   ["default", "Ask before edits"],
   ["acceptEdits", "Edit automatically"],
@@ -33,7 +37,7 @@ export function composer(view, t) {
     .when(s.queue.length > 0, (el) => el.child(v_flex().gap(4).px(4).children(s.queue.map((q) =>
       h_flex().gap(8).px(10).py(5).rounded(8).bg(t.raised).items_center().text_size(12.5)
         .child(div().text_color(t.dim).child("Queued"))
-        .child(div().flex_1().min_w(0).truncate().child(q.text || `${q.images} image${q.images === 1 ? "" : "s"}`))
+        .child(div().flex_1().min_w(0).truncate().child(isRunOutput({ kind: "user", text: q.text }) ? "Command output" : q.text || `${q.images} image${q.images === 1 ? "" : "s"}`))
         .child(div().id(`unq-${q.id}`).px(4).cursor_pointer().text_color(t.dim).hover((s) => s.text_color(t.foreground))
           .on_click((_e, cx) => view.unqueue(q.id, cx)).child("✕"))))))
     .when(view.commandMatches().length > 0, (el) => el.child(commandList(view, t)))
