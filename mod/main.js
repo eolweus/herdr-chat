@@ -17,6 +17,14 @@ const PORT = 7777;
 const DATA = "data/herdr-chat";
 const IMAGE_EXT = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
 const MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
+const PASTE = `ObjC.import("AppKit");
+function run(argv) {
+  const pb = $.NSPasteboard.generalPasteboard;
+  let d = pb.dataForType($.NSPasteboardTypePNG);
+  const tiff = d.isNil() ? pb.dataForType($.NSPasteboardTypeTIFF) : null;
+  if (tiff && !tiff.isNil()) d = $.NSBitmapImageRep.imageRepWithData(tiff).representationUsingTypeProperties($.NSBitmapImageFileTypePNG, $({}));
+  return !d.isNil() && d.writeToFileAtomically(argv[0], true);
+}`;
 const CYCLE = ["default", "acceptEdits", "plan", "auto"];
 
 const ago = (ms) => {
@@ -597,13 +605,9 @@ export default class HerdrChat extends View {
   async pasteImage(cx) {
     const rel = `${DATA}/img/paste-${Date.now()}.png`;
     const abs = `${appHome()}/${rel}`;
-    const r = await exec("osascript", [
-      "-e", "set png_data to (the clipboard as «class PNGf»)",
-      "-e", `set fp to open for access POSIX file "${abs}" with write permission`,
-      "-e", "write png_data to fp",
-      "-e", "close access fp",
-    ]);
-    if (r.code !== 0) return;
+    // AppleScript's «class PNGf» converts the clipboard first and is several times slower than reading the PNG as is.
+    const r = await exec("osascript", ["-l", "JavaScript", "-e", PASTE, abs]);
+    if (r.stdout.trim() !== "true") return;
     const data = Buffer.from(await fs.readFile(abs)).toString("base64");
     this.attachments.push({ type: "image/png", data, path: rel });
     cx.notify();
