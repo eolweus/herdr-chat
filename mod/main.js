@@ -109,7 +109,7 @@ export default class HerdrChat extends View {
     const s = this.state;
     const data = {
       key: this.key, pane: this.pane, machine: this.machine, folder: tilde(this.cwd, this.home), branch: this.branch ?? null,
-      model: s.model, mode: s.mode, usage: s.usage ?? null, context: s.context, outputs: this.outputs(), mcp: s.mcp ?? [], remote: s.remote ?? null,
+      model: s.model, mode: s.mode, usage: s.usage ?? null, context: s.context, outputs: this.outputs(), mcp: s.mcp ?? [], remote: s.remote ?? null, title: s.title ?? null,
     };
     const json = JSON.stringify(data);
     if (json === this.published) return;
@@ -180,7 +180,7 @@ export default class HerdrChat extends View {
     if (!this.pane || this.other) return;
     const status = this.pending() ? "blocked" : this.state.busy ? "working" : this.unseen ? "done" : null;
     const first = this.items.find((i) => i.kind === "user")?.text?.split("\n")[0] ?? null;
-    const json = JSON.stringify({ folder: tilde(this.cwd, this.home), status, title: first && first.slice(0, 80) });
+    const json = JSON.stringify({ folder: tilde(this.cwd, this.home), status, title: this.state.title ?? (first && first.slice(0, 80)), named: Boolean(this.state.title) });
     if (json === this.paneShared) return;
     this.paneShared = json;
     setShared(`herdr-chat:pane:${this.pane}`, JSON.parse(json));

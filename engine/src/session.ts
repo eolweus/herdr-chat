@@ -1,4 +1,4 @@
-import { getSessionMessages, query, type PermissionResult, type PermissionUpdate, type Query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { getSessionInfo, getSessionMessages, query, type PermissionResult, type PermissionUpdate, type Query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { Image, Item, McpServer, State } from "./items";
@@ -84,11 +84,21 @@ export class Session {
     this.loaded = true;
     const id = this.state.session;
     if (!id) return;
+    this.title();
     try {
       for (const m of await getSessionMessages(id, { dir: this.cwd, includeSystemMessages: true })) this.n.feed({ ...m, isReplay: true });
     } catch (e) {
       this.n.notice("error", `Couldn't load the earlier conversation: ${e}`);
     }
+  }
+
+  // Claude names a session (or /rename does) a moment after a turn; custom names win.
+  protected async title() {
+    const id = this.state.session;
+    if (!id) return;
+    const info = await getSessionInfo(id, { dir: this.cwd }).catch(() => undefined);
+    const title = info?.customTitle ?? info?.summary ?? null;
+    if (title && title !== this.state.title) this.n.setState({ title });
   }
 
   snapshot() {
@@ -205,6 +215,8 @@ export class Session {
     if (msg.type === "result") {
       this.usage();
       this.mcp();
+      this.title();
+      setTimeout(() => this.title(), 8000);
       const next = this.queued.shift();
       if (next) { this.send(next); this.changed(); }
     }

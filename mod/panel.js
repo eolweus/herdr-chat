@@ -61,7 +61,7 @@ export class Panel {
       .child(div().text_size(12).text_color(t.dim).text_center().child("Open a Claude chat in this tab to see its details here.")));
 
     const env = section("Environment")
-      .when(Boolean(a.terminal), (el) => el.child(row("square-pen", a.title ? `Terminal · ${a.title}` : "Claude Code in a terminal")))
+      .when(Boolean(a.terminal || a.title), (el) => el.child(row("square-pen", a.terminal ? (a.title ? `Terminal · ${a.title}` : "Claude Code in a terminal") : a.title)))
       .child(row(a.machine ? "server" : "monitor", a.machine ?? "This computer",
         machineColor(a.machine) ? div().size(8).rounded(4).bg(machineColor(a.machine)) : null))
       .child(row("folder", a.folder ?? "No folder"))

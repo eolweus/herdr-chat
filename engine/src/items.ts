@@ -63,6 +63,7 @@ export type State = {
   models: Model[];
   mcp: Mcp[];
   remote: string | null;
+  title: string | null;
 };
 
 export type Mcp = { name: string; label: string };
