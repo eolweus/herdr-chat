@@ -11,6 +11,7 @@ import { Panel } from "./panel.js";
 import { FileView } from "./fileview.js";
 import { permissionCard, questionCard } from "./cards.js";
 import { composer, RUN_TAG, isRunOutput } from "./composer.js";
+import { handoffCard, handoffStrip, isHandoffPost } from "./handoff.js";
 
 const PROTOCOL = 1;
 const PORT = 7777;
@@ -198,7 +199,10 @@ export default class HerdrChat extends View {
     let group = null;
     for (const item of shown) {
       if (item.kind === "permission" && item.state === "allowed" && !item.plan) continue;
-      if (item.kind === "tool" || item.kind === "thinking") {
+      if (isHandoffPost(item)) {
+        group = null;
+        out.push({ kind: "handoff", id: `ho:${item.id}`, item });
+      } else if (item.kind === "tool" || item.kind === "thinking") {
         if (!group) {
           group = { kind: "group", id: `g:${item.id}`, items: [] };
           if (this.expandAll) this.expanded.add(group.id);
@@ -232,8 +236,8 @@ export default class HerdrChat extends View {
     if (!this.pane || this.other) return;
     const status = this.pending() ? "blocked" : this.state.busy ? "working" : this.unseen ? "done" : null;
     const first = this.items.find((i) => i.kind === "user" && !isRunOutput(i) && !i.text?.startsWith("This session is being continued"))?.text?.split("\n")[0] ?? null;
-    const title = this.state.title ?? (first && first.slice(0, 80));
-    this.nameTab(this.state.title ?? first, first);
+    const title = this.handoff?.title ?? this.state.title ?? (first && first.slice(0, 80));
+    this.nameTab(this.handoff?.title ?? this.state.title ?? first, first);
     const json = JSON.stringify({ folder: tilde(this.cwd, this.home), cwd: this.cwd, status, title, named: Boolean(this.state.title) });
     if (json === this.paneShared) return;
     this.paneShared = json;
@@ -349,6 +353,7 @@ export default class HerdrChat extends View {
     else if (m.type === "state") this.setState(m.state);
     else if (m.type === "snapshot") {
       if (m.cwd && m.cwd !== this.cwd) { this.cwd = m.cwd; this.branch = null; this.readFolder(cx); }
+      this.handoff = m.handoff ?? null;
       this.items = [];
       this.byId.clear();
       for (const item of m.items) await this.upsert(item, false);
@@ -811,6 +816,7 @@ export default class HerdrChat extends View {
       case "notice": return noticeRow(item, t);
       case "turn_end": return endRow(item, t, this);
       case "group": return groupRow(item, t, this, children);
+      case "handoff": return handoffCard(item.item, t, this);
     }
     return div();
   }
@@ -892,6 +898,7 @@ export default class HerdrChat extends View {
       .on_drop((e, cx) => cx.spawn(async (cx) => this.drop(e.paths, cx)))
       .on_click((_e, cx) => { this.findPane(); cx.notify(); })
       .when(this.conn !== "connected", (el) => el.child(this.banner(t)))
+      .when(Boolean(this.handoff), (el) => el.child(handoffStrip(this, t)))
       .child(shown.length ? div().relative().flex_1().min_h(0).flex().flex_col()
         .child(transcript)
         .when(!this.following, (el) => el.child(div().absolute().bottom(10).w_full().flex().justify_center()

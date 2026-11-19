@@ -1,0 +1,92 @@
+// Board handoffs in a chat: the strip on a handoff's own pane, and the card where a chat posted one.
+// The sidebar (spaces-tree) publishes every engine's handoffs, with their sender resolved, as shared "handoffs".
+
+import { div } from "gpui-kit";
+import { h_flex } from "gpui-base";
+import { panes, run, shared, spaces } from "herdr";
+
+export const HANDOFF = "#a970ff";
+
+const live = () => shared("handoffs") ?? [];
+const color = (machine, t) => (shared("machine.colors") ?? {})[machine ?? "local"] ?? t.dim;
+const chip = (text, c) => div().flex_none().px(5).h(16).rounded(4).flex().items_center().bg(c + "26").text_color(c).text_size(10.5).font_semibold().child(text);
+const quoted = (s, flag) => s.match(new RegExp(`${flag}\\s+(?:"([^"]*)"|'([^']*)'|(\\S+))`))?.slice(1).find((x) => x !== undefined) ?? null;
+
+export const isHandoffPost = (item) => item.kind === "tool" && item.name === "Bash" && /(^|[\s/])board post\b/.test(item.detail ?? "");
+
+function chatPane(key) {
+  return panes().find((p) => p.mod === "herdr-chat" && shared(`herdr-chat:info:${p.pane}`)?.key === key)?.pane ?? null;
+}
+
+function spaceOf(pane) {
+  const tab = pane && panes().find((p) => p.pane === pane)?.tab;
+  return tab ? spaces().find((s) => s.tabs.some((x) => x.id === tab))?.id ?? null : null;
+}
+
+export function openHandoff(h, near) {
+  const open = chatPane(h.key);
+  if (open) return run("pane.focus", { pane: open });
+  const space = spaceOf(near);
+  run("tab.new", { mod: "herdr-chat", props: { key: h.key, machine: h.machine, cwd: h.cwd }, ...(space ? { space } : {}) });
+}
+
+function state(h, t) {
+  if (!h) return div().flex_none().text_size(12).text_color(t.dim).child("Closed");
+  if (h.result === "done") return div().flex_none().text_size(12).font_semibold().text_color(HANDOFF).child("✓ Done");
+  if (h.result === "failed") return div().flex_none().text_size(12).font_semibold().text_color(t.ansi1).child("✗ Failed");
+  if (h.status === "blocked") return div().flex_none().px(6).h(17).rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).flex().items_center().child("Needs you");
+  if (h.status === "working") return div().flex_none().text_size(12).text_color(t.working).child("Working…");
+  return div().flex_none().text_size(12).text_color(t.dim).child("Idle");
+}
+
+export function handoffCard(item, t, view) {
+  const posted = (item.result ?? "").match(/posted (\S+) -> (\S+)/);
+  const id = posted?.[1] ?? null;
+  const to = posted?.[2] ?? quoted(item.detail ?? "", "--to") ?? "?";
+  const h = id ? live().find((x) => x.id === id) : null;
+  const title = h?.title ?? quoted(item.detail ?? "", "--title") ?? "Handoff";
+  const machine = h?.label ?? to.split("/")[0];
+  const pending = item.status === "running" || item.status === "waiting";
+  const failed = item.status === "error";
+  return h_flex().w_full().px(22).py(5).child(
+    h_flex().id(`handoff-${item.id}`).w_full().gap(8).items_center().px(12).py(8).rounded(10)
+      .border_1().border_color(HANDOFF + "66").bg(HANDOFF + "12")
+      .when(Boolean(h), (el) => el.cursor_pointer().hover((s) => s.bg(HANDOFF + "24")).on_click(() => openHandoff(h, view.pane)))
+      .child(div().flex_none().text_size(14).font_bold().text_color(HANDOFF).child("⤷"))
+      .child(div().flex_none().text_size(13).font_semibold().text_color(HANDOFF).child(pending ? "Handing off to" : failed ? "Couldn't hand off to" : "Handed off to"))
+      .child(chip(machine, h ? color(h.machine, t) : t.dim))
+      .child(div().flex_1().min_w(0).truncate().text_size(13).text_color(t.foreground).child(title))
+      .when(!pending && !failed, (el) => el.child(state(h, t)))
+      .when(Boolean(h), (el) => el.child(div().flex_none().text_size(12).text_color(t.dim).child("Open ›"))));
+}
+
+// The sender's title: another chat's, a terminal agent's, or the handoff it came from.
+function senderTitle(h) {
+  if (h.parentKey) return live().find((x) => x.key === h.parentKey)?.title ?? "a handoff";
+  if (!h.parent) return null;
+  const chat = shared(`herdr-chat:pane:${h.parent}`);
+  return chat?.title ?? panes().find((p) => p.pane === h.parent)?.title ?? null;
+}
+
+export function handoffStrip(view, t) {
+  const meta = view.handoff;
+  if (!meta) return null;
+  const h = live().find((x) => x.key === view.key && (x.machine ?? null) === (view.machine ?? null)) ?? null;
+  const from = String(meta.from ?? "").split("/")[0] || "?";
+  const sender = h && senderTitle(h);
+  const back = h && (h.parent ?? (h.parentKey ? chatPane(h.parentKey) : null));
+  return h_flex().px(16).py(6).gap(8).flex_none().items_center().text_size(12.5)
+    .bg(HANDOFF + "14").border_b_1().border_color(HANDOFF + "40")
+    .child(div().w(3).h(16).rounded(2).bg(HANDOFF))
+    .child(div().flex_none().text_size(14).font_bold().text_color(HANDOFF).child("⤷"))
+    .child(div().flex_none().font_semibold().text_color(HANDOFF).child("Handoff"))
+    .child(div().flex_none().text_color(t.dim).child("from"))
+    .child(chip(h?.fromLabel ?? from, h ? color(h.fromMachine, t) : t.dim))
+    .when(Boolean(sender), (el) => el.child(div().id("handoff-sender").min_w(0).truncate().text_color(t.muted)
+      .when(Boolean(back), (s) => s.cursor_pointer().hover((x) => x.text_color(t.foreground)).on_click(() => run("pane.focus", { pane: back })))
+      .child(back ? `${sender} ↩` : sender)))
+    .child(div().flex_1())
+    .child(div().flex_none().text_color(t.dim).child("running on"))
+    .child(chip(h?.label ?? (view.machine ?? "this computer"), color(view.machine, t)))
+    .when(Boolean(h), (el) => el.child(state(h, t)));
+}
