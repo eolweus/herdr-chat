@@ -1,5 +1,5 @@
 import { View, div } from "gpui-kit";
-import { v_flex, h_flex, TextareaState, InputState, ScrollHandle } from "gpui-base";
+import { v_flex, h_flex, TextareaState, InputState, Input, ScrollHandle } from "gpui-base";
 import { appHome, checking, exec, focused, home, nextCommand, notify, openOverlay, panes, props, readTextFile, run, settings, setShared, shared, spaces, theme } from "herdr";
 import { WebSocket } from "websocket";
 import * as fs from "fs/promises";
@@ -73,6 +73,10 @@ export default class HerdrChat extends View {
     this.input = TextareaState.new({ placeholder: "Ask Claude…" });
     this.input.set_auto_grow(1, 12);
     if (p.draft) this.setDraft(p.draft);
+    this.folder = null;
+    this.folderInput = InputState.new({ placeholder: "Type a folder or path…" });
+    this.folderInput.on("change", (_e, cx) => { this.folder.filter = this.folderInput.value(); this.folder.at = 0; cx.notify(); });
+    this.folderInput.on("submit", (_e, cx) => this.chooseFolder(cx));
     this.input.on("submit", (e, cx) => this.enter(e, cx));
     this.input.on("paste_other", (_e, cx) => this.pasteImage(cx));
     this.input.on("change", (_e, cx) => { this.commandAt = 0; cx.notify(); });
@@ -255,12 +259,41 @@ export default class HerdrChat extends View {
     return { url, token: r.stdout.trim() };
   }
 
+  readFolder(cx) {
+    exec("sh", ["-c", `printf '%s\\n' "$HOME"; git -C '${(this.cwd ?? "").replace(/'/g, "'\\''")}' branch --show-current 2>/dev/null`], { on: this.machine })
+      .then((r) => { const [h, b] = r.stdout.split("\n"); this.home = h || this.home; this.branch = b || null; this.publish(); this.publishPane(); cx.notify(); })
+      .catch(() => {});
+  }
+
+  openFolders(cx) {
+    this.folder = { dirs: [], filter: "", at: 0 };
+    this.folderInput.set_value("");
+    this.folderInput.focus();
+    exec("zoxide", ["query", "-l"], { on: this.machine })
+      .then((r) => { if (this.folder) this.folder.dirs = r.stdout.split("\n").filter(Boolean); cx.notify(); })
+      .catch(() => {});
+    cx.notify();
+  }
+
+  folderMatches() {
+    const words = this.folder.filter.toLowerCase().split(/\s+/).filter(Boolean);
+    return this.folder.dirs.filter((d) => words.every((w) => d.toLowerCase().includes(w))).slice(0, 8);
+  }
+
+  chooseFolder(cx, pick) {
+    const typed = this.folder.filter.trim();
+    pick ??= this.folderMatches()[this.folder.at]
+      ?? (typed.startsWith("/") ? typed : typed.startsWith("~") && this.home ? this.home + typed.slice(1) : null);
+    this.folder = null;
+    this.input.focus();
+    if (pick && pick !== this.cwd) this.send({ type: "cwd", cwd: pick });
+    cx.notify();
+  }
+
   async connect(cx) {
     await fs.mkdir(`${appHome()}/${DATA}/img`, { recursive: true }).catch(() => {});
     this.home = this.machine ? null : home();
-    exec("sh", ["-c", `printf '%s\\n' "$HOME"; git -C '${(this.cwd ?? "").replace(/'/g, "'\\''")}' branch --show-current 2>/dev/null`], { on: this.machine })
-      .then((r) => { const [h, b] = r.stdout.split("\n"); this.home = h || this.home; this.branch = b || null; this.publish(); cx.notify(); })
-      .catch(() => {});
+    this.readFolder(cx);
     let delay = 1000;
     for (;;) {
       try {
@@ -303,6 +336,7 @@ export default class HerdrChat extends View {
     }
     else if (m.type === "state") this.setState(m.state);
     else if (m.type === "snapshot") {
+      if (m.cwd && m.cwd !== this.cwd) { this.cwd = m.cwd; this.branch = null; this.readFolder(cx); }
       this.items = [];
       this.byId.clear();
       for (const item of m.items) await this.upsert(item, false);
@@ -649,6 +683,15 @@ export default class HerdrChat extends View {
   }
 
   key(e, cx) {
+    if (this.folder) {
+      const n = this.folderMatches().length;
+      if (e.keystroke === "escape") { this.folder = null; this.input.focus(); }
+      else if (e.keystroke === "down" && n) this.folder.at = (this.folder.at + 1) % n;
+      else if (e.keystroke === "up" && n) this.folder.at = (this.folder.at + n - 1) % n;
+      else return;
+      cx.notify();
+      return cx.stop_propagation();
+    }
     const cmds = this.commandMatches();
     if (cmds.length && (e.keystroke === "up" || e.keystroke === "down")) {
       this.commandAt = (this.commandAt + (e.keystroke === "down" ? 1 : cmds.length - 1)) % cmds.length;
@@ -714,7 +757,12 @@ export default class HerdrChat extends View {
     const recent = (this.recent ?? []).slice(0, 6);
     return v_flex().flex_1().items_center().justify_center().gap(8).px(24)
       .child(div().text_size(20).text_color(t.foreground).child("What should we work on?"))
-      .child(div().text_size(12.5).text_color(t.dim).child(tilde(this.cwd, this.home) || ""))
+      .child(this.folder ? this.folderPicker(t) : h_flex().id("folder").gap(5).px(8).py(3).rounded(6).items_center().cursor_pointer()
+        .text_size(12.5).text_color(t.dim).hover((s) => s.bg(t.hover).text_color(t.muted))
+        .tooltip("Change folder")
+        .on_click((_e, cx) => this.openFolders(cx))
+        .child(tilde(this.cwd, this.home) || "Pick a folder")
+        .child(div().text_size(10).child("▾")))
       .when(recent.length > 0, (el) => el.child(v_flex().mt(28).w_full().max_w(560).gap(2)
         .child(div().px(10).pb(4).text_size(11.5).text_color(t.dim).child("Pick up where you left off"))
         .children(recent.map((r) => h_flex().id(`resume-${r.id}`).gap(10).px(10).py(7).rounded(8).items_center().cursor_pointer()
@@ -722,6 +770,20 @@ export default class HerdrChat extends View {
           .child(div().flex_1().min_w(0).truncate().text_size(13).text_color(t.foreground).child(r.title))
           .when(Boolean(r.branch) && r.branch !== "HEAD", (el) => el.child(div().flex_none().text_size(11.5).text_color(t.dim).child(r.branch)))
           .child(div().flex_none().w(64).text_right().text_size(11.5).text_color(t.dim).child(ago(r.when)))))));
+  }
+
+  folderPicker(t) {
+    const list = this.folderMatches();
+    return v_flex().gap(6).w_full().max_w(460).mt(4)
+      .child(h_flex().h(34).px(10).items_center().rounded(9).border_1().border_color(t.accent).bg(t.surface)
+        .child(Input.new(this.folderInput).flex_1().h_full().text_size(13).text_color(t.foreground)))
+      .child(v_flex().gap(2).children(list.map((d, i) =>
+        div().id(`dir-${i}`).px(10).py(6).rounded(7).cursor_pointer().text_size(12.5).truncate()
+          .bg(i === this.folder.at ? t.selected : t.background).text_color(i === this.folder.at ? t.foreground : t.muted)
+          .hover((s) => s.bg(t.hover))
+          .on_click((_e, cx) => this.chooseFolder(cx, d))
+          .child(tilde(d, this.home)))))
+      .child(div().px(2).text_size(11.5).text_color(t.dim).child("↑↓ to move · Enter to pick · Esc to cancel"));
   }
 
   resume(id, cx) {
