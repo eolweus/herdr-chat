@@ -108,6 +108,32 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
     if (s.state.busy) return ws.send(JSON.stringify({ type: "error", message: "Stop the current turn first" }));
     return reopen(d, s, String(m.id), s.cwd);
   }
+  if (m.type === "rewind_check") {
+    const r = await s.restoreFiles(String(m.id), true).catch(() => null);
+    return ws.send(JSON.stringify({ type: "rewind_check", id: m.id, files: r?.canRewind ? (r.filesChanged ?? []) : null }));
+  }
+  if (m.type === "rewind") {
+    if (s.state.busy) return ws.send(JSON.stringify({ type: "error", message: "Stop the current turn first" }));
+    try {
+      if (m.files) {
+        const r = await s.restoreFiles(String(m.id));
+        if (!r.canRewind) throw new Error(`Couldn't put the files back: ${r.error ?? "no checkpoint"}`);
+      }
+      return await reopen(d, s, await s.branch(String(m.id), true), s.cwd);
+    } catch (e: any) {
+      return ws.send(JSON.stringify({ type: "error", message: e?.message ?? String(e) }));
+    }
+  }
+  if (m.type === "fork") {
+    try {
+      const key = crypto.randomUUID();
+      panes[key] = { session: await s.branch(String(m.id), false), cwd: s.cwd };
+      if (replay < 0) savePanes();
+      return ws.send(JSON.stringify({ type: "forked", id: m.id, key, cwd: s.cwd }));
+    } catch (e: any) {
+      return ws.send(JSON.stringify({ type: "error", message: e?.message ?? String(e) }));
+    }
+  }
   if (m.type === "cwd") {
     if (s.state.session || s.n.items.length) return ws.send(JSON.stringify({ type: "error", message: "The folder can only change before the first message" }));
     const cwd = String(m.cwd);

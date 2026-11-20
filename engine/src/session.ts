@@ -1,4 +1,4 @@
-import { getSessionInfo, getSessionMessages, query, type PermissionResult, type PermissionUpdate, type Query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { forkSession, getSessionInfo, getSessionMessages, query, type PermissionResult, type PermissionUpdate, type Query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { Image, Item, McpServer, State } from "./items";
@@ -222,6 +222,7 @@ export class Session {
         effort: this.options.effort as any,
         permissionMode: this.options.permissionMode as any,
         model: this.options.model,
+        enableFileCheckpointing: true,
         canUseTool: (tool, input, opts) => this.ask(tool, input, opts.toolUseID, opts.suggestions),
       },
     });
@@ -435,6 +436,22 @@ export class Session {
     this.changed();
     this.denyAll("Interrupted by the user");
     await this.q?.interrupt().catch(() => {});
+  }
+
+  // A copy of the conversation that ends just before message `id`, or null when that was the first message.
+  async branch(id: string, sameTitle: boolean): Promise<string | null> {
+    const sid = this.state.session;
+    const msgs = sid ? await getSessionMessages(sid, { dir: this.cwd, includeSystemMessages: true }) : [];
+    const i = msgs.findIndex((m) => m.uuid === id);
+    if (i < 0) throw new Error("That message isn't in the saved conversation");
+    if (i === 0) return null;
+    return (await forkSession(sid!, { dir: this.cwd, upToMessageId: msgs[i - 1]!.uuid, title: sameTitle ? (this.state.title ?? undefined) : undefined })).sessionId;
+  }
+
+  // Files as they were before message `id`; only edits made while checkpointing was on can be undone.
+  async restoreFiles(id: string, dryRun = false) {
+    await this.ready();
+    return this.q!.rewindFiles(id, { dryRun });
   }
 
   // Flag settings reach a running CLI now and a later one at its start.
