@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Image, Item, McpServer, State } from "./items";
 import { Normalizer, commandsOf } from "./normalizer";
 import { describe } from "./tools";
+import { refreshLimits } from "./limits";
 
 export type Client = { send(o: unknown): void };
 
@@ -266,6 +267,7 @@ export class Session {
     if (this.state.session !== before) this.onSession(this);
     if (msg.type === "result") {
       this.usage();
+      if (this.q) refreshLimits(this.q);
       this.mcp();
       this.title();
       setTimeout(() => this.title(), 8000);

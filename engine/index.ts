@@ -5,6 +5,7 @@ import type { ServerWebSocket } from "bun";
 import { listSessions } from "@anthropic-ai/claude-agent-sdk";
 import { Session, userSettings, type Client, type Handoff } from "./src/session";
 import { ReplaySession } from "./src/replay";
+import { refreshLimits } from "./src/limits";
 
 const PROTOCOL = 1;
 const HOME = process.env.HOME!;
@@ -15,6 +16,7 @@ const PANES_FILE = process.env.HERDR_CHAT_PANES ?? `${HOME}/.local/state/herdr-c
 
 const replay = process.argv.indexOf("--replay");
 if (replay >= 0) ReplaySession.fixture = process.argv[replay + 1]!;
+else { refreshLimits(); setInterval(() => refreshLimits(), 5 * 60_000); }
 
 function token(): string {
   if (existsSync(TOKEN_FILE)) return readFileSync(TOKEN_FILE, "utf8").trim();
