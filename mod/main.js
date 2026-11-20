@@ -364,6 +364,13 @@ export default class HerdrChat extends View {
       this.recent = null;
       if (!this.items.length) this.send({ type: "sessions" });
     } else if (m.type === "sessions") this.recent = m.sessions;
+    else if (m.type === "rewind_check" && this.confirm?.id === m.id) this.confirm.files = m.files;
+    else if (m.type === "forked" && this.forking?.id === m.id) {
+      const draft = this.forking.text;
+      this.forking = null;
+      if (this.pane) run("pane.focus", { pane: this.pane });
+      run("pane.split", { direction: "right", mod: "herdr-chat", props: { key: m.key, machine: this.machine, cwd: m.cwd, draft, ...(props()?.engine ? { engine: props().engine } : {}) } });
+    }
     else if (m.type === "upsert") await this.upsert(m.item, true);
   }
 
@@ -668,6 +675,34 @@ export default class HerdrChat extends View {
   setRemote(on, cx) {
     this.remotePending = true;
     this.send({ type: "remote", enabled: on });
+    cx.notify();
+  }
+
+  hoverRow(id, hovered, cx) {
+    if (hovered && this.hoverUser !== id) this.hoverUser = id;
+    else if (!hovered && this.hoverUser === id) this.hoverUser = null;
+    else return;
+    cx.notify();
+  }
+
+  fork(item, cx) {
+    this.forking = { id: item.id, text: item.text };
+    this.send({ type: "fork", id: item.id });
+    cx.notify();
+  }
+
+  askRewind(item, edit, cx) {
+    this.confirm = { id: item.id, text: item.text, edit, files: undefined, restore: true };
+    this.send({ type: "rewind_check", id: item.id });
+    cx.notify();
+  }
+
+  rewind(cx) {
+    const c = this.confirm;
+    if (!c) return;
+    this.confirm = null;
+    this.send({ type: "rewind", id: c.id, files: Boolean(c.restore && c.files?.length) });
+    if (c.edit) this.setDraft(c.text);
     cx.notify();
   }
 

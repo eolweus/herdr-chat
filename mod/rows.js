@@ -1,4 +1,4 @@
-import { div, image } from "gpui-kit";
+import { div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { markdown, codeBlock, diffBlock } from "./markdown.js";
 
@@ -17,8 +17,52 @@ function dot(status, t) {
   return div().w(14).text_size(9).text_color(status === "error" ? t.blocked : t.done).child("●");
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+function iconButton(id, icon, tip, t, onClick, on) {
+  return div().id(id).size(26).flex().items_center().justify_center().rounded(6).cursor_pointer()
+    .text_color(on ? t.done : t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground))
+    .tooltip(tip).on_click(onClick).child(svg(`mods/herdr-chat/icons/${icon}.svg`).size(14));
+}
+
+// Shown under the message the pointer is on; the row keeps its height so nothing jumps.
+function messageActions(item, t, view) {
+  const saved = UUID.test(item.id) && Boolean(view.state.session);
+  const idle = !view.state.busy && !view.pending();
+  return h_flex().h(26).mt(4).gap(2).items_center().justify_end()
+    .when(view.hoverUser === item.id, (el) => el
+      .when(saved, (el) => el.child(iconButton(`fork-${item.id}`, "split", "Fork from here: a new chat beside this one, from just before this message", t, (_e, cx) => view.fork(item, cx))))
+      .when(saved && idle, (el) => el
+        .child(iconButton(`rewind-${item.id}`, "rotate-ccw", "Rewind: remove this message and everything after it", t, (_e, cx) => view.askRewind(item, false, cx)))
+        .child(iconButton(`edit-${item.id}`, "pencil", "Edit: rewind to before this message and put it back in the box", t, (_e, cx) => view.askRewind(item, true, cx))))
+      .when(Boolean(item.text), (el) => el.child(iconButton(`copyu-${item.id}`, "copy", view.copied === item.id ? "Copied" : "Copy", t,
+        (_e, cx) => view.copyText(item.id, item.text, cx), view.copied === item.id))));
+}
+
+function rewindConfirm(c, t, view) {
+  const files = c.files;
+  const btn = (id, label, primary, onClick) => div().id(id).px(10).py(4).rounded(7).text_size(12).cursor_pointer()
+    .bg(primary ? t.foreground : t.raised).text_color(primary ? t.background : t.foreground).border_1().border_color(primary ? t.foreground : t.border)
+    .hover((s) => s.opacity(0.85)).on_click(onClick).child(label);
+  return v_flex().mt(6).gap(8).max_w(420).px(12).py(10).rounded(10).border_1().border_color(t.border).bg(t.surface).text_size(12.5)
+    .child(div().child(c.edit ? "Edit this message? This message and everything after it are removed, and it goes back in the box." : "Rewind to before this message? It and everything after it are removed."))
+    .child(files === undefined ? div().text_color(t.dim).child("Checking changed files…")
+      : files === null ? div().text_color(t.dim).child("Files can't be put back for this message; they stay as they are.")
+      : !files.length ? div().text_color(t.dim).child("No file edits to put back. Changes made by shell commands aren't tracked.")
+      : h_flex().id("rewind-files").gap(8).items_center().cursor_pointer().on_click((_e, cx) => { c.restore = !c.restore; cx.notify(); })
+        .child(div().child(c.restore ? "☑" : "☐"))
+        .child(div().child(`Also put back ${files.length === 1 ? "1 changed file" : `${files.length} changed files`}`))
+        .tooltip(files.join("\n")))
+    .child(h_flex().gap(8).justify_end()
+      .child(btn("rewind-cancel", "Cancel", false, (_e, cx) => { view.confirm = null; cx.notify(); }))
+      .child(btn("rewind-go", c.edit ? "Edit" : "Rewind", true, (_e, cx) => view.rewind(cx))));
+}
+
 export function userRow(item, t, view) {
-  return row().items_end().py(10).child(
+  const c = view.confirm?.id === item.id ? view.confirm : null;
+  return row().id(`user-${item.id}`).items_end().pt(10).pb(2)
+    .on_hover((hovered, cx) => view.hoverRow(item.id, hovered, cx))
+    .child(
     v_flex().max_w(600).gap(8).px(14).py(10).rounded(16).bg(t.raised)
       .when(item.images.length > 0, (el) => el.child(h_flex().gap(6).flex_wrap()
         .children(item.images.map((_, i) => {
@@ -29,7 +73,8 @@ export function userRow(item, t, view) {
               .on_click(() => view.viewImages(all, all.indexOf(path))).child(image(path).size_full())
             : div().w(160).h(100).rounded(8).bg(t.surface);
         }))))
-      .when(Boolean(item.text), (el) => el.child(div().text_size(14).child(item.text))));
+      .when(Boolean(item.text), (el) => el.child(div().text_size(14).child(item.text))))
+    .child(c ? rewindConfirm(c, t, view) : messageActions(item, t, view));
 }
 
 export function textRow(item, t, view) {
