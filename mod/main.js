@@ -142,7 +142,7 @@ export default class HerdrChat extends View {
       model: s.model, mode: s.mode, usage: s.usage ?? null, context: s.context, outputs: this.outputs(), mcp: s.mcp ?? [], remote: s.remote ?? null, title: s.title ?? null,
     };
     const json = JSON.stringify(data);
-    if (json === this.published) return;
+    if (json === this.published && shared(`herdr-chat:info:${this.pane}`)) return;
     this.published = json;
     setShared(`herdr-chat:info:${this.pane}`, data);
   }
@@ -228,7 +228,8 @@ export default class HerdrChat extends View {
   // A pane mod isn't told its own pane id; it's the focused herdr-chat pane right after opening or a click.
   findPane() {
     const f = focused()?.pane;
-    if (f && panes().find((x) => x.pane === f)?.mod === "herdr-chat") this.pane = f;
+    const owner = f && shared(`herdr-chat:info:${f}`)?.key;
+    if (f && (!owner || owner === this.key) && panes().find((x) => x.pane === f)?.mod === "herdr-chat") this.pane = f;
     if (this.visible()) this.unseen = false;
     this.publishPane();
     this.publish();
@@ -242,7 +243,7 @@ export default class HerdrChat extends View {
     const title = this.handoff?.title ?? this.state.title ?? (first && first.slice(0, 80));
     this.nameTab(this.handoff?.title ?? this.state.title ?? first, first);
     const json = JSON.stringify({ folder: tilde(this.cwd, this.home), cwd: this.cwd, status, title, named: Boolean(this.state.title) });
-    if (json === this.paneShared) return;
+    if (json === this.paneShared && shared(`herdr-chat:pane:${this.pane}`)) return;
     this.paneShared = json;
     setShared(`herdr-chat:pane:${this.pane}`, JSON.parse(json));
   }
