@@ -1,7 +1,7 @@
 import { forkSession, getSessionInfo, getSessionMessages, query, type PermissionResult, type PermissionUpdate, type Query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import type { Image, Item, McpServer, State } from "./items";
+import type { Image, Item, McpServer, McpTool, State } from "./items";
 import { Normalizer, commandsOf } from "./normalizer";
 import { describe } from "./tools";
 import { refreshLimits } from "./limits";
@@ -317,7 +317,20 @@ export class Session {
     const list = await this.q!.mcpServerStatus();
     this.n.setState({ mcp: list.filter((m) => m.status === "needs-auth").map((m) => ({ name: m.name, label: label(m.name) })) });
     this.schedule();
-    return list.map((m) => ({ name: m.name, label: label(m.name), status: m.status, error: m.error ?? null, tools: m.tools?.length ?? 0, scope: m.scope ?? null }));
+    return list.map((m) => {
+      const c = (m.config ?? {}) as { type?: string; url?: string; command?: string; args?: string[] };
+      return {
+        name: m.name, label: label(m.name), status: m.status, error: m.error ?? null, tools: m.tools?.length ?? 0, scope: m.scope ?? null,
+        source: m.source ?? null, version: m.serverInfo?.version ?? null,
+        transport: c.type ?? (c.command ? "stdio" : null), target: c.url ?? (c.command ? [c.command, ...(c.args ?? [])].join(" ") : null),
+      };
+    });
+  }
+
+  async tools(server: string): Promise<McpTool[]> {
+    await this.ready();
+    const m = (await this.q!.mcpServerStatus()).find((x) => x.name === server);
+    return (m?.tools ?? []).map((t) => ({ name: t.name, description: t.description ?? "", readOnly: Boolean(t.annotations?.readOnly), destructive: Boolean(t.annotations?.destructive) }));
   }
 
   async mcpAction(server: string, action: string) {

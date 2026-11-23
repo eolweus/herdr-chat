@@ -49,12 +49,12 @@ export class ReplaySession extends Session {
   }
 
   private fake: McpServer[] = [
-    { name: "logfire", label: "logfire", status: "connected", error: null, tools: 70, scope: "user" },
+    { name: "logfire", label: "logfire", status: "connected", error: null, tools: 3, scope: "user", source: "user", version: "1.4.0", transport: "http", target: "https://logfire-eu.pydantic.dev/mcp" },
     { name: "claude.ai Slack", label: "Slack", status: "connected", error: null, tools: 27, scope: "claudeai" },
     { name: "claude.ai Gmail", label: "Gmail", status: "needs-auth", error: null, tools: 0, scope: "claudeai" },
     { name: "plugin:data:hex", label: "hex", status: "needs-auth", error: null, tools: 0, scope: "dynamic" },
     { name: "plugin:data:definite", label: "definite", status: "failed", error: "MCP endpoint not found at https://api.definite.app", tools: 0, scope: "dynamic" },
-    { name: "pencil", label: "pencil", status: "disabled", error: null, tools: 0, scope: "user" },
+    { name: "pencil", label: "pencil", status: "disabled", error: null, tools: 0, scope: "user", source: "user", version: null, transport: "stdio", target: "pencil mcp --stdio" },
   ];
 
   override async remote(enabled: boolean) {
@@ -65,6 +65,14 @@ export class ReplaySession extends Session {
 
   override async servers() {
     return this.fake;
+  }
+
+  override async tools(server: string) {
+    return server === "logfire" ? [
+      { name: "query_run", description: "Run SQL against your telemetry data.", readOnly: true, destructive: false },
+      { name: "alert_create", description: "Create an SQL-based alert.", readOnly: false, destructive: false },
+      { name: "dashboard_delete", description: "Delete a dashboard.", readOnly: false, destructive: true },
+    ] : [];
   }
 
   override async mcpAction(server: string, action: string) {

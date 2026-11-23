@@ -164,6 +164,7 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
       }
       return;
     case "mcp_list": return ws.send(JSON.stringify({ type: "mcp", servers: await s.servers() }));
+    case "mcp_tools": return ws.send(JSON.stringify({ type: "mcp_tools", server: String(m.server), tools: await s.tools(String(m.server)).catch(() => []) }));
     case "mcp_action":
       try {
         await s.mcpAction(String(m.server), String(m.action));

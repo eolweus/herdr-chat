@@ -73,7 +73,11 @@ export type State = {
 };
 
 export type Mcp = { name: string; label: string };
-export type McpServer = Mcp & { status: string; error: string | null; tools: number; scope: string | null };
+export type McpServer = Mcp & {
+  status: string; error: string | null; tools: number; scope: string | null;
+  source?: string | null; version?: string | null; transport?: string | null; target?: string | null;
+};
+export type McpTool = { name: string; description: string; readOnly: boolean; destructive: boolean };
 
 export type Model = { value: string; name: string; description: string; efforts: string[]; resolved: string; fast: boolean };
 
