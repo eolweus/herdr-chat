@@ -256,8 +256,10 @@ export default class HerdrChat extends View {
     const me = panes().find((x) => x.pane === this.pane);
     const tab = spaces().flatMap((sp) => sp.tabs).find((tb) => tb.id === me?.tab);
     if (!tab || tab.panes !== 1) return;
-    if (tab.named && tab.name !== this.tabName && tab.name !== short(first) && tab.name !== name) return;
+    const ours = this.tabName ?? shared(`herdr-chat:tab:${tab.id}`);
+    if (tab.named && tab.name !== ours && tab.name !== short(first) && tab.name !== name) return;
     this.tabName = name;
+    setShared(`herdr-chat:tab:${tab.id}`, name);
     if (tab.name !== name) run("tab.rename", { id: tab.id, name });
   }
 
