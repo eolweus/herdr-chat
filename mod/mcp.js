@@ -1,6 +1,6 @@
 import { div } from "gpui-kit";
-import { v_flex, h_flex, Input } from "gpui-base";
-import { closeOverlay, props, theme } from "herdr";
+import { v_flex, h_flex, Input, InputState } from "gpui-base";
+import { closeOverlay, props, run, theme } from "herdr";
 import { WebSocket } from "websocket";
 import { PROTOCOL, endpoint, openAuth } from "./engine.js";
 
@@ -12,6 +12,9 @@ const SOURCE = {
   claudeai: "claude.ai connector", plugin: "Plugin", dynamic: "Plugin", managed: "Managed by your organization",
   enterprise: "Managed by your organization", sdk: "Herdr", agent: "Agent definition",
 };
+
+const tilde = (path) => path.replace(/^\/(Users|home)\/[^/]+/, "~");
+const has = (q, ...fields) => !q || fields.some((f) => f?.toLowerCase().includes(q));
 
 const isConnector = (m) => m.scope === "claudeai" || m.source === "claudeai" || m.transport === "claudeai-proxy";
 
@@ -34,8 +37,13 @@ export class McpDialog {
     this.tools = null;
     this.auth = null;
     this.error = null;
+    this.tab = "chat";
+    this.projects = null;
+    this.project = null;
     this.handle = cx.focus_handle();
-    cx.timer.after(50, () => this.handle.focus());
+    this.search = InputState.new({ placeholder: "Search" });
+    this.search.on("change", (_e, cx) => cx.notify());
+    cx.timer.after(50, () => this.search.focus());
     cx.spawn(async (cx) => this.connect(cx));
   }
 
@@ -64,6 +72,7 @@ export class McpDialog {
       this.busy = new Set();
       if (m.servers.some((x) => x.status === "pending")) cx.timer.after(2000, () => this.send({ type: "mcp_list" }));
     } else if (m.type === "mcp_tools" && this.open === m.server) this.tools = m.tools;
+    else if (m.type === "mcp_projects") this.projects = m.projects;
     else if (m.type === "auth") this.auth = await openAuth(this.p.machine, m.server, m.url, (o) => this.send(o));
     else if (m.type === "state" && this.servers && JSON.stringify(m.state.mcp) !== JSON.stringify(this.needsAuth)) {
       this.needsAuth = m.state.mcp;
@@ -87,13 +96,41 @@ export class McpDialog {
     closeOverlay(props().overlay);
   }
 
+  query() {
+    return this.search.value().trim().toLowerCase();
+  }
+
+  clearSearch() {
+    this.search.set_value("");
+    this.search.focus();
+  }
+
+  switchTab(tab, cx) {
+    this.tab = tab;
+    this.clearSearch();
+    if (tab === "projects") this.send({ type: "mcp_projects" });
+    cx.notify();
+  }
+
+  showProject(path, name, cx) {
+    this.project = { path, name };
+    cx.notify();
+  }
+
+  chatIn(path) {
+    run("pane.split", { direction: "right", mod: "herdr-chat", props: { machine: this.p.machine, cwd: path, ...(this.p.engine ? { engine: this.p.engine } : {}) } });
+    this.dismiss();
+  }
+
   refresh(cx) {
+    if (this.tab === "projects") this.send({ type: "mcp_projects" });
     this.send({ type: "mcp_list" });
     if (this.open && Array.isArray(this.tools)) this.send({ type: "mcp_tools", server: this.open });
     cx.notify();
   }
 
   show(server, cx) {
+    this.clearSearch();
     this.open = server;
     this.tools = null;
     this.failure = null;
@@ -101,7 +138,9 @@ export class McpDialog {
   }
 
   back(cx) {
+    this.clearSearch();
     if (this.tools) this.tools = null;
+    else if (this.project) this.project = null;
     else this.open = null;
     cx.notify();
   }
@@ -109,6 +148,7 @@ export class McpDialog {
   act(server, action, cx) {
     this.failure = null;
     if (action === "tools") {
+      this.clearSearch();
       this.tools = "loading";
       this.send({ type: "mcp_tools", server });
     } else if (action === "signin") {
@@ -123,7 +163,8 @@ export class McpDialog {
   }
 
   key(e, cx) {
-    if (e.keystroke === "escape" && this.open) this.back(cx);
+    if (e.keystroke === "escape" && this.query()) this.clearSearch();
+    else if (e.keystroke === "escape" && (this.open || this.project)) this.back(cx);
     else if (e.keystroke === "escape") this.dismiss();
     else return;
     cx.stop_propagation();
@@ -148,20 +189,31 @@ function dialog(view) {
     .child(link("mcp-close", "✕", (_e, cx) => view.dismiss()));
   if (view.error) return v_flex().size_full().rounded(14).border_1().border_color(t.border).bg(t.surface)
     .child(header("MCP servers", null)).child(div().px(18).py(12).text_size(12.5).text_color(t.blocked).child(view.error));
-  const body = menu.tools && server ? tools(view, server, t) : server ? details(view, server, t, dot) : list(view, t, dot);
-  const title = menu.tools && server ? `${server.label} tools` : server ? server.label : "MCP servers";
-  const back = menu.tools ? (_e, cx) => view.back(cx) : server ? (_e, cx) => view.back(cx) : null;
+  const project = view.project && view.tab === "projects" ? view.project : null;
+  const body = project ? projectDetails(view, project, t) : menu.tools && server ? tools(view, server, t) : server ? details(view, server, t, dot)
+    : view.tab === "projects" ? projects(view, t) : list(view, t, dot);
+  const title = project ? project.name : menu.tools && server ? `${server.label} tools` : server ? server.label : "MCP servers";
+  const back = project || server ? (_e, cx) => view.back(cx) : null;
+  const searchable = !project && (!server || menu.tools);
+  const tab = (id, label) => div().id(`mcp-tab-${id}`).px(10).py(3).rounded(6).text_size(12).cursor_pointer()
+    .text_color(view.tab === id ? t.foreground : t.dim).when(view.tab === id, (el) => el.bg(t.raised).border_1().border_color(t.border))
+    .hover((s) => s.text_color(t.foreground)).on_click((_e, cx) => view.switchTab(id, cx)).child(label);
   return v_flex().id("mcp-dialog").track_focus(view.handle).on_key_down((e, cx) => view.key(e, cx)).size_full().rounded(14).border_1().border_color(t.border).bg(t.surface).overflow_hidden()
     .child(header(title, back))
+    .when(searchable, (el) => el.child(h_flex().px(14).pt(10).gap(8).items_center()
+      .child(h_flex().flex_1().h(30).px(10).items_center().rounded(8).border_1().border_color(t.border).bg(t.background)
+        .child(Input.new(view.search).flex_1().text_size(12.5)))
+      .when(!server, (el) => el.child(tab("chat", "This chat")).child(tab("projects", "Other projects")))))
     .child(body);
 }
 
 function list(view, t, dot) {
-  const servers = view.servers;
+  const q = view.query();
+  const servers = view.servers?.filter((m) => has(q, m.label, m.name, m.target)) ?? null;
   const groups = ORDER.map((st) => [st, (servers ?? []).filter((m) => m.status === st)]).filter(([, l]) => l.length);
   return v_flex().id("mcp-list").flex_1().min_h(0).overflow_y_scrollbar().px(8).py(6)
     .when(!servers, (el) => el.child(div().px(10).py(10).text_size(12.5).text_color(t.dim).child("Loading servers…")))
-    .when(Boolean(servers) && !servers.length, (el) => el.child(div().px(10).py(10).text_size(12.5).text_color(t.dim).child("No MCP servers configured")))
+    .when(Boolean(servers) && !servers.length, (el) => el.child(div().px(10).py(10).text_size(12.5).text_color(t.dim).child(q ? "No servers match" : "No MCP servers configured")))
     .children(groups.flatMap(([st, l]) => [
       div().px(10).pt(10).pb(4).text_size(11).text_color(t.dim).child(`${GROUP[st]} · ${l.length}`),
       ...l.map((m) => h_flex().id(`mcp-row-${m.name}`).gap(10).px(10).py(7).rounded(8).items_center().min_w(0)
@@ -207,15 +259,52 @@ function details(view, m, t, dot) {
 }
 
 function tools(view, m, t) {
-  const list = view.tools;
+  const q = view.query();
+  const list = Array.isArray(view.tools) ? view.tools.filter((x) => has(q, x.name, x.description)) : view.tools;
   const badge = (label, c) => div().flex_none().px(6).rounded(5).border_1().border_color(t.border).text_size(10.5).text_color(c).child(label);
   return v_flex().id("mcp-tools").flex_1().min_h(0).overflow_y_scrollbar().px(18).py(8)
     .when(list === "loading", (el) => el.child(div().py(8).text_size(12.5).text_color(t.dim).child("Loading tools…")))
-    .when(Array.isArray(list) && !list.length, (el) => el.child(div().py(8).text_size(12.5).text_color(t.dim).child(`${m.label} has no tools right now`)))
+    .when(Array.isArray(list) && !list.length, (el) => el.child(div().py(8).text_size(12.5).text_color(t.dim).child(q ? "No tools match" : `${m.label} has no tools right now`)))
     .children(Array.isArray(list) ? list.map((x) => v_flex().py(7).gap(2).border_b_1().border_color(t.border)
       .child(h_flex().gap(8).items_center().min_w(0)
         .child(div().flex_1().min_w(0).truncate().text_size(13).text_color(t.foreground).child(x.name))
         .when(x.readOnly, (el) => el.child(badge("read-only", t.dim)))
         .when(x.destructive, (el) => el.child(badge("destructive", t.blocked))))
       .when(Boolean(x.description), (el) => el.child(div().text_size(12).text_color(t.dim).child(x.description)))) : []);
+}
+
+const SCOPE = { local: "Local config (~/.claude.json)", project: "Project config (.mcp.json)" };
+
+function projects(view, t) {
+  const q = view.query();
+  const list = (view.projects ?? []).map((p) => ({ ...p, servers: p.servers.filter((m) => has(q, m.name, m.target, p.path)) })).filter((p) => p.servers.length);
+  return v_flex().id("mcp-projects").flex_1().min_h(0).overflow_y_scrollbar().px(8).py(6)
+    .when(!view.projects, (el) => el.child(div().px(10).py(10).text_size(12.5).text_color(t.dim).child("Loading projects…")))
+    .when(Boolean(view.projects) && !list.length, (el) => el.child(div().px(10).py(10).text_size(12.5).text_color(t.dim)
+      .child(q ? "No servers match" : "No other folder has its own MCP servers")))
+    .children(list.flatMap((p) => [
+      div().px(10).pt(10).pb(4).text_size(11).text_color(t.dim).truncate().child(tilde(p.path)),
+      ...p.servers.map((m) => h_flex().id(`mcp-p-${p.path}-${m.name}`).gap(10).px(10).py(7).rounded(8).items_center().min_w(0)
+        .cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => view.showProject(p.path, m.name, cx))
+        .child(div().flex_none().text_size(13).text_color(t.foreground).child(m.name))
+        .child(div().flex_none().px(6).rounded(5).border_1().border_color(t.border).text_size(10.5).text_color(t.dim).child(m.scope === "project" ? ".mcp.json" : "local"))
+        .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(t.dim).child(m.target ?? ""))
+        .child(div().flex_none().text_size(13).text_color(t.dim).child("›"))),
+    ]));
+}
+
+function projectDetails(view, sel, t) {
+  const m = view.projects?.find((p) => p.path === sel.path)?.servers.find((x) => x.name === sel.name);
+  const row = (k, v) => h_flex().gap(12).py(3).items_start().min_w(0)
+    .child(div().w(96).flex_none().text_size(12).text_color(t.dim).child(k))
+    .child(div().flex_1().min_w(0).text_size(12.5).text_color(t.foreground).child(v));
+  return v_flex().id("mcp-project").flex_1().min_h(0).overflow_y_scrollbar().px(18).py(12).gap(12)
+    .child(v_flex()
+      .child(row("Folder", tilde(sel.path)))
+      .when(Boolean(m?.transport), (el) => el.child(row(m.transport === "stdio" ? "Command" : "URL", m.target ?? m.transport)))
+      .child(row("Config", SCOPE[m?.scope] ?? "")))
+    .child(div().text_size(12).text_color(t.dim).child("Chats started in this folder load this server. This chat can't use it."))
+    .child(h_flex().id("mcp-chat-in").mx(-10).px(10).py(7).rounded(8).items_center().text_size(13).text_color(t.foreground)
+      .cursor_pointer().hover((s) => s.bg(t.hover)).on_click(() => view.chatIn(sel.path))
+      .child(div().flex_1().child("Start a chat in this folder")).child(div().text_size(13).text_color(t.dim).child("›")));
 }
