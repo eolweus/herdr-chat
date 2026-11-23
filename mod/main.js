@@ -505,12 +505,14 @@ export default class HerdrChat extends View {
       return this.restartEngine(m === undefined ? this.machine : ["mac", "local", "here"].includes(m) ? null : m, cx);
     }
     if (!this.ws || (!text && !this.attachments.length)) return;
+    const encoding = this.attachments.filter((a) => a.data === null);
+    if (encoding.length) return void cx.spawn(async (cx) => { await Promise.all(encoding.map((a) => a.ready)); this.submit(cx); });
     const waiting = this.pending();
     if (waiting && text && !this.attachments.length) {
       if (waiting.kind === "permission") this.answer({ item: waiting.id, decision: "deny", message: text }, cx);
       else this.answer({ item: waiting.id, answers: null, message: `The user replied instead of picking: ${text}` }, cx);
     }
-    this.prompt(text, this.attachments.map(({ type, data }) => ({ type, data })));
+    this.prompt(text, this.attachments.filter((a) => a.data).map(({ type, data }) => ({ type, data })));
     this.input.set_value("");
     this.attachments = [];
     cx.notify();
@@ -732,9 +734,15 @@ export default class HerdrChat extends View {
     // AppleScript's «class PNGf» converts the clipboard first and is several times slower than reading the PNG as is.
     const r = await exec("osascript", ["-l", "JavaScript", "-e", PASTE, abs]);
     if (r.stdout.trim() !== "true") return;
-    const data = Buffer.from(await fs.readFile(abs)).toString("base64");
-    this.attachments.push({ type: "image/png", data, path: rel });
+    this.attachments.push(this.encode({ type: "image/png", path: rel }));
     cx.notify();
+  }
+
+  // Base64 in the mod's JavaScript takes seconds for a screenshot, so the shell does it while the thumbnail already shows.
+  encode(a) {
+    a.data = null;
+    a.ready = exec("base64", ["-i", `${appHome()}/${a.path}`]).then((r) => { a.data = r.code === 0 ? r.stdout.replace(/\s/g, "") : ""; });
+    return a;
   }
 
   async drop(paths, cx) {
@@ -745,10 +753,9 @@ export default class HerdrChat extends View {
         continue;
       }
       try {
-        const bytes = await fs.readFile(path);
         const rel = `${DATA}/img/drop-${Date.now()}.${ext}`;
-        await fs.writeFile(`${appHome()}/${rel}`, bytes);
-        this.attachments.push({ type: MIME[ext], data: Buffer.from(bytes).toString("base64"), path: rel });
+        await fs.writeFile(`${appHome()}/${rel}`, await fs.readFile(path));
+        this.attachments.push(this.encode({ type: MIME[ext], path: rel }));
       } catch {}
     }
     cx.notify();
