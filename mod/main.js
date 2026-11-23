@@ -79,7 +79,7 @@ export default class HerdrChat extends View {
     this.pickId = null;
     this.resumeId = p.resume ?? null;
     this.input.on("submit", (e, cx) => this.enter(e, cx));
-    this.input.on("paste_other", (_e, cx) => this.pasteImage(cx));
+    this.input.on("paste_other", (_e, cx) => cx.spawn(async (cx) => this.pasteImage(cx)));
     this.input.on("change", (_e, cx) => {
       this.commandAt = 0;
       if (this.slashToken()?.start !== this.dismissed) this.dismissed = null;
