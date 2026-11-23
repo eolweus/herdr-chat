@@ -72,7 +72,7 @@ export function composer(view, t) {
             .child(image(a.path).h(56).max_w(120).rounded(6)))
           .child(div().id(`rm-${i}`).absolute().top(-6).right(-6).w(18).h(18).rounded(9).flex().items_center().justify_center()
             .bg(t.raised).border_1().border_color(t.border).text_size(10).cursor_pointer()
-            .on_click((_e, cx) => view.removeAttachment(i, cx)).child("✕"))))))
+            .on_click((_e, cx) => { cx.stop_propagation(); view.removeAttachment(i, cx); }).child("✕"))))))
       .child(h_flex().w_full().items_end().gap(4).pl(6).pr(8).py(4)
         .child(div().id("attach").mb(4).w(30).h(30).rounded(15).flex().items_center().justify_center().cursor_pointer()
           .text_size(18).text_color(t.muted).hover((s) => s.bg(t.hover)).tooltip("Attach files")
