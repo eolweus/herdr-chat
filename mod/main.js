@@ -277,7 +277,6 @@ export default class HerdrChat extends View {
     const r = shared("folder-picker.result");
     if (!this.pickId || r?.id !== this.pickId) return;
     this.pickId = null;
-    this.resumeId = p.resume ?? null;
     this.input.focus();
     if (r.folder && r.folder !== this.cwd) this.send({ type: "cwd", cwd: r.folder });
   }
