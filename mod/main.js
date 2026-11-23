@@ -13,9 +13,9 @@ import { permissionCard, questionCard } from "./cards.js";
 import { composer, RUN_TAG, isRunOutput } from "./composer.js";
 import { handoffCard, handoffStrip, isHandoffPost } from "./handoff.js";
 import { moveChat } from "./move.js";
+import { McpDialog } from "./mcp.js";
+import { PROTOCOL, endpoint, openAuth } from "./engine.js";
 
-const PROTOCOL = 1;
-const PORT = 7777;
 const DATA = "data/herdr-chat";
 const IMAGE_EXT = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
 const MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
@@ -46,6 +46,7 @@ export default class HerdrChat extends View {
     if (p.viewer) return void (this.other = new Viewer(p, cx));
     if (p.panel) return void (this.other = new Panel(cx));
     if (p.file) return void (this.other = new FileView(p, cx));
+    if (p.mcp) return void (this.other = new McpDialog(p.mcp, cx));
     this.key = p.key ?? null;
     this.machine = p.machine || null;
     this.cwd = p.cwd ?? focused()?.cwd ?? null;
@@ -60,7 +61,6 @@ export default class HerdrChat extends View {
     this.mono = settings().font_family;
     this.modelMenu = Boolean(p.models);
     this.modelSub = typeof p.models === "string" ? p.models : null;
-    this.mcpMenu = p.mcp ? { servers: null, busy: new Set() } : null;
     this.remoteMenu = Boolean(p.remote);
     this.remotePending = false;
     this.picks = new Map();
@@ -220,6 +220,7 @@ export default class HerdrChat extends View {
   }
 
   async close() {
+    this.other?.dispose?.();
     if (this.pane && !this.other) { setShared(`herdr-chat:info:${this.pane}`, null); setShared(`herdr-chat:pane:${this.pane}`, null); }
     await this.ws?.close().catch(() => {});
   }
@@ -261,22 +262,6 @@ export default class HerdrChat extends View {
     if (tab.name !== name) run("tab.rename", { id: tab.id, name });
   }
 
-  async endpoint() {
-    let url = props()?.engine ?? `ws://127.0.0.1:${PORT}`;
-    if (this.machine && !props()?.engine) {
-      const map = JSON.parse((await readTextFile(`${appHome()}/${DATA}/machines.json`).catch(() => null)) ?? "{}");
-      if (map[this.machine]) url = map[this.machine];
-      else {
-        const r = await exec("ssh", ["-G", this.machine]);
-        const host = r.stdout.match(/^hostname (\S+)/m)?.[1] ?? this.machine;
-        url = `ws://${host}:${PORT}`;
-      }
-    }
-    const r = await exec("sh", ["-c", "cat ~/.config/herdr-chat/token"], { on: this.machine });
-    if (r.code !== 0) throw new Error(`no engine token on ${this.machine ?? "this computer"} (run scripts/install.sh there)`);
-    return { url, token: r.stdout.trim() };
-  }
-
   readFolder(cx) {
     exec("sh", ["-c", `printf '%s\\n' "$HOME"; git -C '${(this.cwd ?? "").replace(/'/g, "'\\''")}' branch --show-current 2>/dev/null`], { on: this.machine })
       .then((r) => { const [h, b] = r.stdout.split("\n"); this.home = h || this.home; this.branch = b || null; this.publish(); this.publishPane(); cx.notify(); })
@@ -315,7 +300,7 @@ export default class HerdrChat extends View {
     let delay = 1000;
     for (;;) {
       try {
-        const { url, token } = await this.endpoint();
+        const { url, token } = await endpoint(this.machine);
         this.ws = await WebSocket.connect(url);
         await this.ws.write(JSON.stringify({ type: "hello", v: PROTOCOL, token }));
         await this.ws.write(JSON.stringify({ type: "open", key: this.key, cwd: this.cwd }));
@@ -348,10 +333,6 @@ export default class HerdrChat extends View {
     if (m.type === "hello" && m.v !== PROTOCOL) this.error = `engine speaks protocol ${m.v}, this pane ${PROTOCOL}`;
     else if (m.type === "error") { this.error = m.message; this.remotePending = false; }
     else if (m.type === "auth") await this.openAuth(m.server, m.url);
-    else if (m.type === "mcp" && this.mcpMenu) {
-      this.mcpMenu = { servers: m.servers, busy: new Set() };
-      if (m.servers.some((x) => x.status === "pending")) cx.timer.after(2000, () => { if (this.mcpMenu) this.send({ type: "mcp_list" }); });
-    }
     else if (m.type === "state") this.setState(m.state);
     else if (m.type === "snapshot") {
       if (m.cwd && m.cwd !== this.cwd) { this.cwd = m.cwd; this.branch = null; this.readFolder(cx); }
@@ -377,7 +358,6 @@ export default class HerdrChat extends View {
   setState(next) {
     const was = this.state.busy;
     if (next.remote !== this.state.remote) this.remotePending = false;
-    if (this.mcpMenu && (!this.mcpMenu.servers || JSON.stringify(next.mcp) !== JSON.stringify(this.state.mcp))) this.send({ type: "mcp_list" });
     this.state = next;
     if (was && !next.busy && !this.visible()) this.unseen = true;
     this.publish();
@@ -618,20 +598,7 @@ export default class HerdrChat extends View {
   }
 
   async openAuth(server, url) {
-    if (!url) return (this.auth = null);
-    await exec("open", [url]);
-    const port = new URL(new URL(url).searchParams.get("redirect_uri") ?? "http://x").port;
-    if (this.machine && port) {
-      await exec("sh", ["-c", `(ssh -o ExitOnForwardFailure=yes -N -L ${port}:127.0.0.1:${port} ${this.machine} & p=$!; sleep 300; kill $p) >/dev/null 2>&1 &`]);
-    }
-    const input = this.machine ? InputState.new({ placeholder: "Browser showed an error? Paste its address here" }) : null;
-    input?.on("enter", (_e, cx) => {
-      const v = input.value().trim();
-      if (v) this.send({ type: "mcp_callback", server, url: v });
-      input.set_value("");
-      cx.notify();
-    });
-    this.auth = { server, url, input };
+    this.auth = await openAuth(this.machine, server, url, (o) => this.send(o));
   }
 
   replyFor(endId) {
@@ -667,7 +634,6 @@ export default class HerdrChat extends View {
 
   toggleRemoteMenu(cx) {
     this.remoteMenu = !this.remoteMenu;
-    this.mcpMenu = null;
     this.modelMenu = false;
     cx.notify();
   }
@@ -714,18 +680,9 @@ export default class HerdrChat extends View {
   }
 
   openMcp(cx) {
-    this.mcpMenu = { servers: this.mcpMenu?.servers ?? null, busy: new Set() };
     this.modelMenu = false;
-    this.send({ type: "mcp_list" });
+    openOverlay({ mod: "herdr-chat", kind: "dialog", frame: "none", width: 560, height: 560, props: { mcp: { key: this.key, machine: this.machine, cwd: this.cwd, engine: props()?.engine ?? null } } });
     cx?.notify();
-  }
-
-  mcpAction(server, action, cx) {
-    if (!this.mcpMenu) return;
-    this.mcpMenu.busy.add(server);
-    if (action === "signin") this.signIn(server);
-    else this.send({ type: "mcp_action", server, action });
-    cx.notify();
   }
 
   toggleModels(cx) {
@@ -830,7 +787,6 @@ export default class HerdrChat extends View {
     } else if (cmds.length && e.keystroke === "tab") this.complete(cmds[this.commandAt] ?? cmds[0], cx);
     else if (cmds.length && e.keystroke === "escape") { this.dismissed = this.slashToken()?.start ?? null; cx.notify(); }
     else if (this.modelMenu && e.keystroke === "escape") { this.modelMenu = false; cx.notify(); }
-    else if (this.mcpMenu && e.keystroke === "escape") { this.mcpMenu = null; cx.notify(); }
     else if (this.remoteMenu && e.keystroke === "escape") { this.remoteMenu = false; cx.notify(); }
     else if (e.keystroke === "escape" && this.state.busy) this.interrupt(cx);
     else if (e.keystroke === "shift-tab") this.cycleMode(cx);

@@ -63,7 +63,6 @@ export function composer(view, t) {
         .child(div().id(`unq-${q.id}`).px(4).cursor_pointer().text_color(t.dim).hover((s) => s.text_color(t.foreground))
           .on_click((_e, cx) => view.unqueue(q.id, cx)).child("✕"))))))
     .when(view.commandMatches().length > 0, (el) => el.child(commandList(view, t)))
-    .when(Boolean(view.mcpMenu), (el) => el.child(mcpList(view, t)))
     .when(Boolean(view.remoteMenu), (el) => el.child(remoteCard(view, t)))
     .child(v_flex().w_full().rounded(14).border_1().border_color(machineColor(view.machine) ?? (view.focusedInput ? t.accent : t.input)).bg(t.surface)
       .when(view.attachments.length > 0, (el) => el.child(h_flex().gap(8).px(10).pt(10).flex_wrap()
@@ -176,45 +175,6 @@ function modelMenu(view, t) {
         if (m) { view.pickModel(m.value, cx); cx.stop_propagation(); }
       })
       .child(main).when(Boolean(side), (el) => el.child(side)));
-}
-
-const MCP_ORDER = ["needs-auth", "failed", "pending", "connected", "disabled"];
-const MCP_GROUP = { "needs-auth": "Needs sign-in", failed: "Failed", pending: "Connecting", connected: "Connected", disabled: "Disabled" };
-
-function mcpList(view, t) {
-  const { servers, busy } = view.mcpMenu;
-  const color = { connected: t.done, "needs-auth": t.working, failed: t.blocked, pending: t.dim, disabled: t.dim };
-  const action = (m, id, label) => div().id(`mcp-${id}-${m.name}`).flex_none().px(8).py(2).rounded(6).border_1().border_color(t.border)
-    .bg(t.raised).text_size(11.5).text_color(t.foreground).cursor_pointer().hover((s) => s.bg(t.hover))
-    .on_click((_e, cx) => view.mcpAction(m.name, id, cx)).child(label);
-  const actions = (m) => {
-    if (busy.has(m.name)) return [div().text_size(11.5).text_color(t.dim).child(view.auth?.server === m.name && view.auth.url ? "Finish in your browser" : "Working…")];
-    if (m.status === "needs-auth") return [action(m, "signin", "Sign in"), action(m, "disable", "Disable")];
-    if (m.status === "disabled") return [action(m, "enable", "Enable")];
-    if (m.status === "connected" && !m.name.startsWith("claude.ai ") && m.scope !== "claudeai") return [action(m, "reconnect", "Reconnect"), action(m, "signout", "Sign out"), action(m, "disable", "Disable")];
-    return [action(m, "reconnect", "Reconnect"), action(m, "disable", "Disable")];
-  };
-  const groups = MCP_ORDER.map((st) => [st, (servers ?? []).filter((m) => m.status === st)]).filter(([, list]) => list.length);
-  return v_flex().w_full().rounded(12).border_1().border_color(t.border).bg(t.surface)
-    .child(h_flex().px(14).pt(10).pb(6).items_center()
-      .child(div().flex_1().text_size(13).font_semibold().text_color(t.foreground).child("MCP servers"))
-      .child(div().id("mcp-refresh").px(6).text_size(11.5).text_color(t.dim).cursor_pointer().hover((s) => s.text_color(t.foreground))
-        .on_click((_e, cx) => view.openMcp(cx)).child("Refresh"))
-      .child(div().id("mcp-close").px(6).text_size(13).text_color(t.dim).cursor_pointer().hover((s) => s.text_color(t.foreground))
-        .on_click((_e, cx) => { view.mcpMenu = null; cx.notify(); }).child("✕")))
-    .child(v_flex().id("mcp-list").max_h(380).overflow_y_scrollbar().px(4).pb(6)
-      .when(!servers, (el) => el.child(div().px(10).py(8).text_size(12).text_color(t.dim).child("Loading servers…")))
-      .when(Boolean(servers) && !servers.length, (el) => el.child(div().px(10).py(8).text_size(12).text_color(t.dim).child("No MCP servers configured")))
-      .children(groups.flatMap(([st, list]) => [
-        div().px(10).pt(8).pb(2).text_size(11).text_color(t.dim).child(MCP_GROUP[st]),
-        ...list.map((m) => h_flex().gap(10).px(10).py(6).rounded(8).items_center().min_w(0).hover((s) => s.bg(t.hover))
-          .child(div().flex_none().size(7).rounded(4).bg(color[m.status] ?? t.dim))
-          .child(div().flex_none().text_size(13).text_color(m.status === "disabled" ? t.dim : t.foreground).child(m.label))
-          .child(div().flex_1().min_w(0).truncate().text_size(11.5).text_color(m.error ? t.blocked : t.dim)
-            .child(m.error ?? (m.tools ? `${m.tools} tools` : "")))
-          .children(actions(m))),
-      ])))
-    .child(div().px(14).pb(8).text_size(11).text_color(t.dim).child("Esc to close"));
 }
 
 function remoteCard(view, t) {
