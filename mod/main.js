@@ -738,7 +738,7 @@ export default class HerdrChat extends View {
     cx.notify();
   }
 
-  // Base64 in the mod's JavaScript takes seconds for a screenshot, so the shell does it while the thumbnail already shows.
+  // The shell encodes faster than the mod's JavaScript, and meanwhile the thumbnail already shows.
   encode(a) {
     a.data = null;
     a.ready = exec("base64", ["-i", `${appHome()}/${a.path}`]).then((r) => { a.data = r.code === 0 ? r.stdout.replace(/\s/g, "") : ""; });
