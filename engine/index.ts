@@ -6,6 +6,7 @@ import { listSessions } from "@anthropic-ai/claude-agent-sdk";
 import { Session, userSettings, type Client, type Handoff } from "./src/session";
 import { ReplaySession } from "./src/replay";
 import { refreshLimits } from "./src/limits";
+import { projectServers } from "./src/projects";
 
 const PROTOCOL = 1;
 const HOME = process.env.HOME!;
@@ -164,6 +165,7 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
       }
       return;
     case "mcp_list": return ws.send(JSON.stringify({ type: "mcp", servers: await s.servers() }));
+    case "mcp_projects": return ws.send(JSON.stringify({ type: "mcp_projects", projects: replay >= 0 ? [] : projectServers(s.cwd) }));
     case "mcp_tools": return ws.send(JSON.stringify({ type: "mcp_tools", server: String(m.server), tools: await s.tools(String(m.server)).catch(() => []) }));
     case "mcp_action":
       try {
