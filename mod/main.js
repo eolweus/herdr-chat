@@ -77,6 +77,7 @@ export default class HerdrChat extends View {
     this.input.set_auto_grow(1, 12);
     if (p.draft) this.setDraft(p.draft);
     this.pickId = null;
+    this.resumeId = p.resume ?? null;
     this.input.on("submit", (e, cx) => this.enter(e, cx));
     this.input.on("paste_other", (_e, cx) => this.pasteImage(cx));
     this.input.on("change", (_e, cx) => {
@@ -276,6 +277,7 @@ export default class HerdrChat extends View {
     const r = shared("folder-picker.result");
     if (!this.pickId || r?.id !== this.pickId) return;
     this.pickId = null;
+    this.resumeId = p.resume ?? null;
     this.input.focus();
     if (r.folder && r.folder !== this.cwd) this.send({ type: "cwd", cwd: r.folder });
   }
@@ -330,7 +332,8 @@ export default class HerdrChat extends View {
       this.setState(m.state);
       this.stick = true;
       this.recent = null;
-      if (!this.items.length) this.send({ type: "sessions" });
+      if (!this.items.length && this.resumeId) { this.send({ type: "resume", id: this.resumeId }); this.resumeId = null; }
+      else if (!this.items.length) this.send({ type: "sessions" });
     } else if (m.type === "sessions") this.recent = m.sessions;
     else if (m.type === "rewind_check" && this.confirm?.id === m.id) this.confirm.files = m.files;
     else if (m.type === "forked" && this.forking?.id === m.id) {
