@@ -114,13 +114,13 @@ export class Session {
     this.mcp();
   }
 
-  // Claude names a session (or /rename does) a moment after a turn; custom names win.
+  // summary falls back to the latest prompt, and a long transcript's name can be beyond the SDK's read, so keep the last name.
   protected async title() {
     const id = this.state.session;
     if (!id) return;
     const info = await getSessionInfo(id, { dir: this.cwd }).catch(() => undefined);
-    const title = info?.customTitle ?? info?.summary ?? null;
-    if (title && title !== this.state.title) this.n.setState({ title });
+    const title = info?.customTitle ?? null;
+    if (title && title !== this.state.title) { this.n.setState({ title }); this.onSession(this); }
   }
 
   snapshot() {

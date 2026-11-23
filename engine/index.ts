@@ -30,7 +30,7 @@ function token(): string {
 
 const TOKEN = Buffer.from(token());
 
-type Pane = { session: string | null; cwd: string; remote?: boolean; handoff?: Handoff; closed?: string; preamble?: string };
+type Pane = { session: string | null; cwd: string; remote?: boolean; handoff?: Handoff; closed?: string; preamble?: string; title?: string };
 const panes: Record<string, Pane> = existsSync(PANES_FILE) ? JSON.parse(readFileSync(PANES_FILE, "utf8")) : {};
 function savePanes() {
   mkdirSync(dirname(PANES_FILE), { recursive: true });
@@ -41,7 +41,7 @@ const sessions = new Map<string, Session>();
 
 function remember(s: Session) {
   const was = panes[s.key];
-  panes[s.key] = { session: s.state.session, cwd: s.cwd, remote: s.wantRemote, handoff: s.handoff ?? undefined, closed: was?.closed, preamble: s.preamble ?? undefined };
+  panes[s.key] = { session: s.state.session, cwd: s.cwd, remote: s.wantRemote, handoff: s.handoff ?? undefined, closed: was?.closed, preamble: s.preamble ?? undefined, title: s.state.title ?? undefined };
   if (replay < 0) savePanes();
 }
 
@@ -53,6 +53,7 @@ function open(key: string, cwd: string): Session {
   const s = new Kind(key, known?.cwd ?? cwd, known?.session ?? null, remember);
   s.handoff = known?.handoff ?? null;
   s.preamble = known?.preamble ?? null;
+  if (known?.title && known.session) s.n.setState({ title: known.title });
   sessions.set(key, s);
   if (replay < 0 && (known?.remote ?? userSettings().remoteControlAtStartup === true) && existsSync(s.cwd)) s.remote(true).catch(() => {});
   return s;
@@ -61,7 +62,7 @@ function open(key: string, cwd: string): Session {
 async function reopen(d: Data, s: Session, session: string | null, cwd: string) {
   s.close();
   sessions.delete(s.key);
-  panes[s.key] = { ...panes[s.key], session, cwd, remote: s.wantRemote };
+  panes[s.key] = { ...panes[s.key], session, cwd, remote: s.wantRemote, title: undefined };
   if (replay < 0) savePanes();
   const next = open(s.key, cwd);
   d.session = next;
