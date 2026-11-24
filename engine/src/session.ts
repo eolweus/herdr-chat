@@ -135,6 +135,8 @@ export class Session {
       for (const m of [...await beforeCompacts(id, later).catch(() => []), ...later]) this.n.feed({ ...m, isReplay: true });
       this.n.setState({ outputs: outputsOf(this.n.items), first: firstOf(this.n.items) });
       this.dropImages(this.n.items.map((i) => i.id));
+      // Panes get these in the snapshot; sent as updates too, each would be drawn on its own.
+      this.n.dirty.clear();
     } catch (e) {
       this.n.notice("error", `Couldn't load the earlier conversation: ${e}`);
     }
