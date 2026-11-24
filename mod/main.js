@@ -107,6 +107,7 @@ export default class HerdrChat extends View {
       const shown = this.visible();
       if (shown && !this.shown) this.input.focus();
       this.shown = shown;
+      this.pageAndImages(cx);
     });
     cx.spawn(async (cx) => this.connect(cx));
     cx.spawn(async (cx) => {
