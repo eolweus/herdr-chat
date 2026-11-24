@@ -22,3 +22,5 @@ The script starts the engine as a service (launchd on macOS, a systemd user unit
 For a remote machine you've added to Herdr, run the same script there with `HERDR_CHAT_HOSTS` set to the address the engine should listen on (for example a VPN address). The mod reaches it at that machine's ssh hostname on port 7777, or at the URL you give it in `~/.config/herdr-app/data/herdr-chat/machines.json`, e.g. `{"server": "ws://10.0.0.2:7777"}`. Each engine makes its own token, which the mod reads over ssh.
 
 Handoffs between chats use a `board` command on your PATH when it's there; without it everything else works as usual.
+
+To write a message in your editor, bind a key to the `herdr-chat.edit` command in `~/.config/herdr-app/keys.json`, e.g. `"cmd-g": "herdr-chat.edit"` under `global`. It opens the draft in `$EDITOR` beside the chat, copies each save back into the composer, and returns there when you quit.
