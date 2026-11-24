@@ -452,12 +452,13 @@ export default class HerdrChat extends View {
     const r = this.restore;
     if (this.following && !r && y + viewH < this.scroll.content_size().height - 2) { this.stick = true; cx.notify(); }
     if (r?.merged) {
-      if (Math.abs(y - r.target) < 2 || ++r.tries > 10) { this.restore = null; this.loadingOlder = false; }
+      // Once the person scrolls again, correcting the position would fight them.
+      if (Math.abs(y - r.target) < 2 || (this.wheeledAt ?? 0) > this.committedAt || ++r.tries > 5) { this.restore = null; this.loadingOlder = false; }
       cx.notify();
     }
     // Without a scroll since the last page, a page that failed to keep the view in place would pull in the next one.
     const asked = this.following || (this.wheeledAt ?? 0) > (this.committedAt ?? 0);
-    if (this.olderAvailable && !this.loadingOlder && asked && this.items.length && y < viewH * 1.5) {
+    if (this.olderAvailable && !this.loadingOlder && asked && this.items.length && y < viewH * 3) {
       this.loadingOlder = true;
       this.send({ type: "older", before: this.items[0].id });
     }
