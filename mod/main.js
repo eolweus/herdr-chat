@@ -39,6 +39,9 @@ const uuid = () => "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) =
   const r = Math.floor(Math.random() * 16);
   return (c === "x" ? r : 8 + (r % 4)).toString(16);
 });
+// Space kept above per message not yet loaded, until real row heights are known.
+const ROW_GUESS = 60;
+const olderCount = (older) => (typeof older === "number" ? older : older ? 100 : 0);
 const safe = (s) => s.replace(/[^A-Za-z0-9_-]/g, "_");
 const tilde = (path, h) => (h && path?.startsWith(h) ? `~${path.slice(h.length)}` : path ?? "");
 
@@ -346,6 +349,8 @@ export default class HerdrChat extends View {
       this.restore = null;
       this.loadingOlder = false;
       this.olderAvailable = Boolean(m.older);
+      this.left = olderCount(m.older);
+      this.spacer = this.left * ROW_GUESS;
       this.asked.clear();
       for (const item of m.items) await this.upsert(item, false);
       this.setState(m.state);
@@ -357,6 +362,7 @@ export default class HerdrChat extends View {
       this.loadingOlder = false;
       if (m.before !== this.items[0]?.id) return;
       this.olderAvailable = Boolean(m.older);
+      this.left = olderCount(m.older);
       const n = this.items.length;
       for (const item of m.items) await this.upsert(item, false);
       const older = this.items.splice(n);
@@ -373,7 +379,7 @@ export default class HerdrChat extends View {
       if (this.pane) run("pane.focus", { pane: this.pane });
       run("pane.split", { direction: "right", mod: "herdr-chat", props: { key: m.key, machine: this.machine, cwd: m.cwd, draft, ...(props()?.engine ? { engine: props().engine } : {}) } });
     }
-    else if (m.type === "upsert") await this.upsert(m.item, true);
+    else if (m.type === "upsert") { this.liveAt = Date.now(); await this.upsert(m.item, true); }
   }
 
   setState(next) {
@@ -458,12 +464,20 @@ export default class HerdrChat extends View {
     }
     // Without a scroll since the last page, a page that failed to keep the view in place would pull in the next one.
     const asked = this.following || (this.wheeledAt ?? 0) > (this.committedAt ?? 0);
-    if (this.olderAvailable && !this.loadingOlder && asked && this.items.length && y < viewH * 3) {
+    if (this.following && !r && this.olderAvailable && this.items.length) {
+      // Nothing above is in view at the bottom, so the space kept for unloaded history can be resized there.
+      const zoom = settings().zoom || 1, shown = this.lastShown ?? [];
+      let sum = 0;
+      for (const blk of shown) sum += (this.heights.get(blk.id) ?? 0) / zoom;
+      const want = Math.round(this.left * Math.max(20, sum / Math.max(1, this.items.length)) * 1.1);
+      if (sum && Math.abs(want - this.spacer) > Math.max(viewH, this.spacer * 0.2)) { this.spacer = want; this.stick = true; cx.notify(); }
+    }
+    if (this.olderAvailable && !this.loadingOlder && asked && this.items.length && y < this.spacer + viewH * 3) {
       this.loadingOlder = true;
       this.send({ type: "older", before: this.items[0].id });
     }
     const zoom = settings().zoom || 1;
-    let top = 10;
+    let top = 10 + this.spacer;
     for (const b of this.lastShown ?? []) {
       const h = (this.heights.get(b.id) ?? 0) / zoom;
       if (top > y + 2 * viewH) break;
@@ -490,24 +504,30 @@ export default class HerdrChat extends View {
     }
   }
 
-  // An older page is drawn invisibly first; once its height is known it goes above, and the view moves down by as much.
-  // The marker is laid out a frame before the page goes in, so a scroll request can find it whenever Herdr runs it.
+  // A measured page replaces as much of the space kept above, so nothing below moves; only a shortfall or leftover needs a scroll.
   commitOlder(height, cx) {
     if (!this.staged || this.restore) return;
     const zoom = settings().zoom || 1, h = height / zoom;
-    const y = this.scroll.offset().y, viewH = this.scroll.viewport_size().height;
-    this.restore = { at: y + h + viewH, target: y + h, height, merged: false, tries: 0, n: (this.restores = (this.restores ?? 0) + 1) };
+    const spacer = this.olderAvailable ? Math.max(0, this.spacer - h) : 0;
+    const shift = h + spacer - this.spacer;
+    if (Math.abs(shift) < 1 || this.following) {
+      this.spacer = spacer;
+      if (this.following) this.stick = true;
+      return this.mergeOlder(cx);
+    }
+    const y = this.scroll.offset().y, viewH = this.scroll.viewport_size().height, target = Math.max(0, y + shift);
+    this.restore = { at: shift > 0 ? target + viewH : target + 1, target, spacer, merged: false, tries: 0, n: (this.restores = (this.restores ?? 0) + 1) };
     cx.notify();
   }
 
   mergeOlder(cx) {
     const r = this.restore;
-    if (!r || r.merged || !this.staged) return;
+    if (r?.merged || !this.staged) return;
     this.items = [...this.staged, ...this.items];
     this.staged = null;
-    r.merged = true;
     this.committedAt = Date.now();
-    if (this.contentH) this.contentH += r.height;
+    if (r) { r.merged = true; this.spacer = r.spacer; }
+    else { this.loadingOlder = false; this.settle = { until: Date.now() + 1500, h: this.contentH }; }
     cx.notify();
   }
 
@@ -950,7 +970,13 @@ export default class HerdrChat extends View {
     cx.notify();
   }
 
-  grew(h) {
+  grew(h, cx) {
+    // A page measured alone can lay out a little differently once joined to the rows below; the kept space absorbs that.
+    const s = this.settle;
+    if (s?.h && s.until > Date.now() && !this.following && (this.liveAt ?? 0) < this.committedAt) {
+      const d = (h - s.h) / (settings().zoom || 1);
+      if (Math.abs(d) >= 1 && this.spacer >= d) { this.spacer -= d; cx.notify(); return; }
+    }
     if (!this.following && this.contentH) this.fromBottom += h - this.contentH;
     this.contentH = h;
   }
@@ -1039,7 +1065,8 @@ export default class HerdrChat extends View {
       .on_scroll_wheel((e, cx) => this.wheel(e, cx))
       .on_size_change((size) => { this.viewH = size.height; })
       .child(v_flex().id("transcript-content").relative().w_full().items_center()
-        .on_size_change((size) => this.grew(size.height))
+        .on_size_change((size, cx) => this.grew(size.height, cx))
+        .when(this.spacer > 0, (el) => el.child(div().flex_none().h(this.spacer)))
         .children(shown.map((i) => v_flex().id(`row-${i.id}`).w_full().items_center()
           .on_size_change((size) => this.heights.set(i.id, size.height))
           .child(this.renderItem(i, t, children).max_w(880))))
@@ -1047,7 +1074,7 @@ export default class HerdrChat extends View {
           .on_size_change((size, cx) => this.commitOlder(size.height, cx))
           .children((staged ?? []).map((i) => this.renderItem(i, t, children).max_w(880))))))
       .child(div().h(8))
-      // Revealing this marker scrolls by exactly the height the older page added.
+      // Revealing this marker scrolls by exactly the height the content above changed by.
       .when(Boolean(restore), (el) => el.child(div().id(`restore-${restore.n}`).absolute().top(restore.at - 1).left(0).w(1).h(1)
         .on_size_change((_s, cx) => this.mergeOlder(cx))));
     return v_flex().id("root").track_focus(this.handle).size_full().bg(t.background).text_color(t.foreground)
