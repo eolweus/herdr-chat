@@ -428,7 +428,7 @@ export default class HerdrChat extends View {
 
   openLink(href, cx) {
     const target = this.links.target(href, this.cwd);
-    if (target) openFile(target.path, this.machine, { line: target.line, beside: this.pane });
+    if (target) openFile(cx, target.path, this.machine, { line: target.line, beside: this.pane });
     else if (/^https?:\/\//.test(href)) cx.open_url(href);
   }
 

@@ -1,11 +1,17 @@
 import { appHome, exec, home, panes, run } from "herdr";
 
 // herdr-mods' files-work also previews images and PDFs and opens nvim; use it when it's installed.
-let filesWork = false;
-exec("test", ["-e", `${appHome()}/mods/files-work/mod.json`]).then((r) => (filesWork = r.code === 0), () => {});
+let filesWork = null;
 
 // Opens beside `beside`, replacing a file viewer already in that tab so clicks don't pile up panes.
-export function openFile(path, machine, { line = null, beside = null } = {}) {
+export function openFile(cx, path, machine, opts) {
+  cx.spawn(async () => {
+    filesWork ??= (await exec("test", ["-e", `${appHome()}/mods/files-work/mod.json`]).catch(() => null))?.code === 0;
+    split(path, machine, opts);
+  });
+}
+
+function split(path, machine, { line = null, beside = null } = {}) {
   const mod = filesWork ? "files-work" : "herdr-chat";
   const props = filesWork ? { path, machine, line } : { file: path, machine };
   const all = panes(), tab = beside && all.find((x) => x.pane === beside)?.tab;
@@ -21,7 +27,7 @@ const PATHLIKE = /^(?:~\/|\.{1,2}\/|\/)?[\w.@+-]+(?:\/[\w.@+-]+)*\/?$/;
 const TOKENS = /(`[^`\n]+`|!?\[[^\]\n]*\]\([^)\n]*\)|<[^>\n]+>|[a-z][\w+.-]*:\/\/\S+)/i;
 const BARE = /(^|[\s"'(*_])((?:~|\.{1,2})?\/?[\w.@+-]+\/[\w./@+-]*[\w@+-]|\/[\w.@+-]+\.[\w]+)((?::\d+){1,2})?/g;
 
-const split = (ref) => {
+const parse = (ref) => {
   const m = ref.match(LINE);
   return m ? { path: ref.slice(0, m.index), line: Number(m[1] ?? m[2]) } : { path: ref, line: null };
 };
@@ -57,7 +63,7 @@ export class FileLinks {
         return abs ? `${pre}[${ref}${line ?? ""}](${url(abs, line ? Number(line.slice(1).split(":")[0]) : null)})` : all;
       });
       if (part[0] !== "`") return part;
-      const { path, line } = split(part.slice(1, -1).trim());
+      const { path, line } = parse(part.slice(1, -1).trim());
       if (!candidate(path)) return part;
       const abs = this.resolve(path);
       return abs ? `[${part}](${url(abs, line)})` : part;
@@ -92,7 +98,7 @@ for p; do case $p in "~/"*) q="$HOME/\${p#??}";; /*) q=$p;; *) q="$PWD/$p";; esa
       return { path: decodeURIComponent(p), line: line ? Number(line) : null };
     }
     if (/^[a-z][\w+.-]*:/i.test(href) && !href.startsWith("file:")) return null;
-    const { path, line } = split(decodeURIComponent(href.replace(/^file:\/\//, "")));
+    const { path, line } = parse(decodeURIComponent(href.replace(/^file:\/\//, "")));
     const abs = path.startsWith("~/") ? (cwd?.startsWith(home()) ? home() + path.slice(1) : path) : path.startsWith("/") || !cwd ? path : `${cwd}/${path.replace(/^\.\//, "")}`;
     return { path: this.known.get(path) ?? abs, line };
   }

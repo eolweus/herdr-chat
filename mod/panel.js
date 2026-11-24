@@ -100,7 +100,7 @@ export class Panel {
       .when(!a.outputs?.length, (el) => el.child(div().text_size(12).text_color(t.dim).child("Files Claude creates or edits show up here.")))
       .children((a.outputs ?? []).map((o, i) => h_flex().id(`out-${i}`).gap(10).items_center().min_w(0).text_size(12.5).py(2).rounded(6)
         .cursor_pointer().hover((s) => s.bg(t.hover))
-        .on_click(() => openFile(o.path, a.machine ?? null))
+        .on_click((_e, cx) => openFile(cx, o.path, a.machine ?? null))
         .child(svg(`mods/herdr-chat/icons/${o.created ? "file" : "square-pen"}.svg`).size(14).flex_none().text_color(t.dim))
         .child(div().flex_1().min_w(0).truncate().child(o.name))
         .when(o.add > 0, (el) => el.child(div().text_size(11.5).text_color(t.ansi2).child(`+${o.add}`)))
