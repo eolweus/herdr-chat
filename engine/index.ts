@@ -15,6 +15,14 @@ const HOSTS = (process.env.HERDR_CHAT_HOSTS ?? "127.0.0.1").split(",").filter(Bo
 const TOKEN_FILE = `${HOME}/.config/herdr-chat/token`;
 const PANES_FILE = process.env.HERDR_CHAT_PANES ?? `${HOME}/.local/state/herdr-chat/panes.json`;
 
+for (const level of ["log", "warn", "error"] as const) {
+  const out = console[level].bind(console);
+  console[level] = (...args: unknown[]) => out(new Date().toLocaleString("sv-SE"), ...args);
+}
+process.on("uncaughtException", (e) => console.error("uncaught:", e));
+process.on("unhandledRejection", (e) => console.error("unhandled rejection:", e));
+process.on("SIGTERM", () => { console.log("stopping (SIGTERM)"); process.exit(0); });
+
 const replay = process.argv.indexOf("--replay");
 if (replay >= 0) ReplaySession.fixture = process.argv[replay + 1]!;
 else { refreshLimits(); setInterval(() => refreshLimits(), 5 * 60_000); }
@@ -94,6 +102,7 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
     d.session?.detach(d.client);
     const s = open(String(m.key || crypto.randomUUID()), String(m.cwd || HOME));
     d.session = s;
+    console.log(`open ${s.key}`);
     await s.load();
     s.attach(d.client);
     if (!existsSync(s.cwd)) ws.send(JSON.stringify({ type: "error", message: `${s.cwd} doesn't exist on this machine` }));
@@ -271,17 +280,36 @@ for (const hostname of HOSTS) {
         ws.data.client = { send: (o) => ws.send(JSON.stringify(o)) };
       },
       async message(ws, raw) {
+        const start = Date.now();
+        let type = "?";
         try {
-          await handle(ws, JSON.parse(String(raw)));
+          const m = JSON.parse(String(raw));
+          type = m.type;
+          await handle(ws, m);
         } catch (e) {
+          console.error(`${type} failed:`, e);
           ws.send(JSON.stringify({ type: "error", message: String(e) }));
         }
+        if (Date.now() - start > 5000) console.warn(`${type} took ${Date.now() - start}ms${ws.data.session ? ` (${ws.data.session.key})` : ""}`);
       },
-      close(ws) {
+      close(ws, code, reason) {
+        if (ws.data.session) console.log(`close ${ws.data.session.key} ${code}${reason ? ` ${reason}` : ""}`);
         ws.data.session?.detach(ws.data.client);
       },
     },
   });
 }
+
+// A stalled event loop shows as lag; the hourly line shows it was still alive.
+let tick = Date.now(), beats = 0;
+setInterval(() => {
+  const lag = Date.now() - tick - 60_000;
+  tick = Date.now();
+  if (lag > 2000) console.warn(`event loop stalled ${lag}ms`);
+  if (++beats % 60 === 0) {
+    const live = [...sessions.values()];
+    console.log(`alive: ${live.length} sessions, ${live.reduce((n, s) => n + s.clients.size, 0)} panes, ${Math.round(process.memoryUsage().rss / 1e6)}MB`);
+  }
+}, 60_000);
 
 console.log(`herdr-chat engine on ${HOSTS.map((h) => `${h}:${PORT}`).join(", ")}${replay >= 0 ? ` replaying ${ReplaySession.fixture}` : ""}`);
