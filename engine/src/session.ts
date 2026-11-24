@@ -179,7 +179,7 @@ export class Session {
       items.unshift(item);
       i--;
     }
-    return { items, older: i > 0 };
+    return { items, older: i };
   }
 
   older(before: string) {
