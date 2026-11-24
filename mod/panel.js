@@ -1,15 +1,9 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, appHome, exec, focused, home, panes, run, setShared, shared, theme } from "herdr";
+import { agents, exec, focused, home, panes, run, setShared, shared, theme } from "herdr";
+import { openFile } from "./filelinks.js";
 import { TerminalSession } from "./terminal.js";
 import { machineColor } from "./composer.js";
-
-// herdr-mods' files-work also previews images and PDFs and opens nvim; use it when it's installed.
-let filesWork = false;
-exec("test", ["-e", `${appHome()}/mods/files-work/mod.json`]).then((r) => (filesWork = r.code === 0), () => {});
-const openFile = (path, machine) => run("pane.split", filesWork
-  ? { direction: "right", mod: "files-work", props: { path, machine } }
-  : { direction: "right", mod: "herdr-chat", props: { file: path, machine } });
 
 const fmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1)}k` : String(n));
 

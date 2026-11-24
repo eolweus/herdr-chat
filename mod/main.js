@@ -15,6 +15,7 @@ import { handoffCard, handoffStrip, isHandoffPost } from "./handoff.js";
 import { moveChat } from "./move.js";
 import { McpDialog } from "./mcp.js";
 import { PROTOCOL, endpoint, openAuth } from "./engine.js";
+import { FileLinks, openFile } from "./filelinks.js";
 
 const DATA = "data/herdr-chat";
 const IMAGE_EXT = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
@@ -56,6 +57,7 @@ export default class HerdrChat extends View {
     this.conn = "connecting";
     this.error = null;
     this.codes = new CodeCache();
+    this.links = new FileLinks();
     this.expanded = new Set();
     this.expandAll = Boolean(p.expand);
     this.mono = settings().font_family;
@@ -95,9 +97,10 @@ export default class HerdrChat extends View {
     cx.timer.after(400, () => this.findPane());
     if (checking()) return;
     // Herdr only sends "focus" for pane.go, not for clicks, tab switches or pane.focus.
-    cx.timer.every(200, () => {
+    cx.timer.every(200, (cx) => {
       // A new chat's input takes focus before its pane exists, so the pane is looked up once it does.
       if (!this.pane) this.findPane();
+      if (this.links.pending.size) cx.spawn(async (cx) => { if (await this.links.check(this.cwd, this.machine)) cx.notify(); });
       const shown = this.visible();
       if (shown && !this.shown) this.input.focus();
       this.shown = shown;
@@ -330,7 +333,7 @@ export default class HerdrChat extends View {
     else if (m.type === "auth") await this.openAuth(m.server, m.url);
     else if (m.type === "state") this.setState(m.state);
     else if (m.type === "snapshot") {
-      if (m.cwd && m.cwd !== this.cwd) { this.cwd = m.cwd; this.branch = null; this.readFolder(cx); }
+      if (m.cwd && m.cwd !== this.cwd) { this.cwd = m.cwd; this.branch = null; this.links = new FileLinks(); this.readFolder(cx); }
       this.handoff = m.handoff ?? null;
       this.items = [];
       this.byId.clear();
@@ -421,6 +424,12 @@ export default class HerdrChat extends View {
 
   imagePath(id, i) {
     return this.images.get(`${id}:${i}`) ?? null;
+  }
+
+  openLink(href, cx) {
+    const target = this.links.target(href, this.cwd);
+    if (target) openFile(target.path, this.machine, { line: target.line, beside: this.pane });
+    else if (/^https?:\/\//.test(href)) cx.open_url(href);
   }
 
   visible() {

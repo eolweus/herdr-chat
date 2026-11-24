@@ -78,7 +78,7 @@ export function userRow(item, t, view) {
 }
 
 export function textRow(item, t, view) {
-  return row().py(8).child(markdown(item.id, item.text || " ", t, view.codes, { onRun: (id, code, terminal, cx) => view.runCommand(id, code, terminal, cx), runs: view.runs }));
+  return row().py(8).child(markdown(item.id, item.text || " ", t, view.codes, { onRun: (id, code, terminal, cx) => view.runCommand(id, code, terminal, cx), runs: view.runs, links: view.links, onLink: (href, cx) => view.openLink(href, cx) }));
 }
 
 export function thinkingRow(item, t, view) {
