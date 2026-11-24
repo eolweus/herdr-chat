@@ -3,7 +3,7 @@
 
 import { div } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { exec, home, notify, panes, run, setShared, shared, spaces } from "herdr";
+import { exec, notify, panes, run, setShared, shared, spaces } from "herdr";
 
 export const HANDOFF = "#a970ff";
 
@@ -17,7 +17,7 @@ const closing = () => shared("handoffs.closing") ?? {};
 // The same signed close as `board close <id>`; the sidebar clears the mark once the session is gone.
 async function markDone(h) {
   setShared("handoffs.closing", { ...closing(), [h.id]: Date.now() });
-  const r = await exec(`${home()}/dotfiles/bin/board`, ["close", h.id], { timeout: 60000 }).catch((e) => ({ code: -1, stderr: String(e?.message ?? e) }));
+  const r = await exec("board", ["close", h.id], { timeout: 60000 }).catch((e) => ({ code: -1, stderr: String(e?.message ?? e) }));
   if (r.code === 0) return true;
   const { [h.id]: _, ...rest } = closing();
   setShared("handoffs.closing", rest);

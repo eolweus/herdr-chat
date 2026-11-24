@@ -50,7 +50,7 @@ export async function moveChat(view, args) {
   const words = args.trim().split(/\s+/).filter(Boolean);
   const force = words.includes("--force");
   const [target, folder] = words.filter((w) => w !== "--force");
-  if (!target) throw new Error("say where: /move mac or /move munin");
+  if (!target) throw new Error("say where: /move mac or /move <machine>");
   const src = view.machine ?? null;
   const dst = machineArg(target);
   if (dst === src) throw new Error(`this chat already runs on ${label(src)}`);
