@@ -3,6 +3,7 @@ import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { Image, Item, McpServer, McpTool, Output, State } from "./items";
 import { Normalizer, commandsOf } from "./normalizer";
+import { beforeCompacts } from "./history";
 import { describe } from "./tools";
 import { refreshLimits } from "./limits";
 
@@ -127,7 +128,8 @@ export class Session {
     }
     this.title();
     try {
-      for (const m of await getSessionMessages(id, { dir: this.cwd, includeSystemMessages: true })) this.n.feed({ ...m, isReplay: true });
+      const later = await getSessionMessages(id, { dir: this.cwd, includeSystemMessages: true });
+      for (const m of [...await beforeCompacts(id, later).catch(() => []), ...later]) this.n.feed({ ...m, isReplay: true });
       this.n.setState({ outputs: outputsOf(this.n.items), first: firstOf(this.n.items) });
     } catch (e) {
       this.n.notice("error", `Couldn't load the earlier conversation: ${e}`);

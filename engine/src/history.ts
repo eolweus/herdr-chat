@@ -1,0 +1,42 @@
+import { readdir, readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+async function transcript(id: string): Promise<string | null> {
+  const root = join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), "projects");
+  for (const dir of await readdir(root).catch(() => [] as string[])) {
+    const file = join(root, dir, `${id}.jsonl`);
+    const text = await readFile(file, "utf8").catch(() => null);
+    if (text !== null) return text;
+  }
+  return null;
+}
+
+// getSessionMessages starts at the latest compact; the parts before it are only linked by logicalParentUuid.
+export async function beforeCompacts(id: string, later: { type: string; uuid?: string }[]): Promise<any[]> {
+  const boundary = later[0]?.type === "system" ? later[0].uuid : null;
+  if (!boundary) return [];
+  const text = await transcript(id);
+  if (!text) return [];
+  const byUuid = new Map<string, any>();
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    try {
+      const e = JSON.parse(line);
+      if (e.uuid) byUuid.set(e.uuid, e);
+    } catch {}
+  }
+  const seen = new Set(later.map((m) => m.uuid));
+  const out: any[] = [], walked = new Set<string>();
+  let e = byUuid.get(boundary);
+  for (let cur = e?.parentUuid ?? e?.logicalParentUuid; cur && !walked.has(cur) && (e = byUuid.get(cur)); cur = e.parentUuid ?? e.logicalParentUuid) {
+    walked.add(cur);
+    if (seen.has(e.uuid) || e.isSidechain || (e.type !== "user" && e.type !== "assistant")) continue;
+    seen.add(e.uuid);
+    out.push({
+      type: e.type, uuid: e.uuid, session_id: id, message: e.message, parent_tool_use_id: null,
+      tool_use_result: e.toolUseResult, isCompactSummary: e.isCompactSummary, is_meta: e.isMeta, timestamp: e.timestamp,
+    });
+  }
+  return out.reverse();
+}
