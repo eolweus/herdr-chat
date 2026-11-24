@@ -1,1 +1,6 @@
-{ "place": "none", "title": "Claude", "focusable": true }
+{
+  "place": "none",
+  "title": "Claude",
+  "focusable": true,
+  "description": "Claude Code as a chat pane, run by an engine on each machine through the Agent SDK. Tool calls fold into one line, edits show as diffs, images can be pasted, and the side panel shows context use, files changed and MCP servers."
+}
