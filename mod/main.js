@@ -64,6 +64,7 @@ export default class HerdrChat extends View {
     this.remoteMenu = Boolean(p.remote);
     this.remotePending = false;
     this.picks = new Map();
+    this.qPage = new Map();
     this.otherInputs = new Map();
     this.images = new Map();
     this.originals = new Set();
@@ -392,7 +393,9 @@ export default class HerdrChat extends View {
     const inputs = item.questions.map((q) => {
       const s = InputState.new({ placeholder: "Something else…" });
       s.on("submit", (_e, cx) => {
+        const qi = item.questions.indexOf(q);
         if (item.questions.length === 1 && !q.multiSelect && s.value().trim()) this.answer({ item: item.id, answers: { [q.question]: s.value().trim() } }, cx);
+        else if (qi < item.questions.length - 1) this.goQuestion(item, qi + 1, cx);
         else this.submitQuestion(item, cx);
       });
       return s;
@@ -562,6 +565,13 @@ export default class HerdrChat extends View {
     else { set.clear(); set.add(label); }
     picks[q.question] = set;
     this.picks.set(item.id, picks);
+    const qi = item.questions.indexOf(q);
+    if (!q.multiSelect && qi < item.questions.length - 1) return this.goQuestion(item, qi + 1, cx);
+    cx.notify();
+  }
+
+  goQuestion(item, page, cx) {
+    this.qPage.set(item.id, Math.max(0, Math.min(page, item.questions.length - 1)));
     cx.notify();
   }
 
@@ -575,7 +585,8 @@ export default class HerdrChat extends View {
       if (other) parts.push(other);
       if (parts.length) answers[q.question] = parts.join(", ");
     });
-    if (Object.keys(answers).length < item.questions.length) return;
+    const missing = item.questions.findIndex((q) => !answers[q.question]);
+    if (missing >= 0) return this.goQuestion(item, missing, cx);
     this.answer({ item: item.id, answers }, cx);
   }
 

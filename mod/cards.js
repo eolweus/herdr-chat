@@ -49,15 +49,26 @@ export function questionCard(item, t, view) {
   const pending = item.state === "pending";
   const picks = view.picks.get(item.id) ?? {};
   const inputs = view.otherInputs.get(item.id) ?? [];
-  const single = item.questions.length === 1 && !item.questions[0].multiSelect;
+  const total = item.questions.length;
+  const single = total === 1 && !item.questions[0].multiSelect;
+  const page = Math.min(view.qPage.get(item.id) ?? 0, total - 1);
+  const answered = (q, qi) => (picks[q.question]?.size ?? 0) > 0 || Boolean(inputs[qi]?.value().trim());
+  const shown = pending && total > 1 ? [[item.questions[page], page]] : item.questions.map((q, qi) => [q, qi]);
+  const go = (to) => (_e, cx) => view.goQuestion(item, to, cx);
+  const steps = h_flex().gap(4).items_center().children(item.questions.map((q, qi) =>
+    div().id(`step-${item.id}-${qi}`).size(7).rounded(4).cursor_pointer().on_click(go(qi))
+      .bg(qi === page ? t.accent : answered(q, qi) ? t.muted : t.border)));
   return v_flex().w_full().px(22).py(6).child(card(t, pending)
-    .children(item.questions.map((q, qi) => {
+    .when(pending && total > 1, (el) => el.child(h_flex().gap(8).items_center()
+      .child(div().text_size(11.5).text_color(t.dim).child(`Question ${page + 1} of ${total}`))
+      .child(steps)))
+    .children(shown.map(([q, qi]) => {
       const chosen = picks[q.question] ?? new Set();
       const answer = item.answers?.[q.question];
       return v_flex().gap(8)
-        .child(h_flex().gap(8).items_center()
-          .when(Boolean(q.header), (el) => el.child(div().px(6).py(1).rounded(5).bg(t.raised).text_size(11).text_color(t.muted).child(q.header)))
-          .child(div().flex_1().text_size(13.5).font_semibold().child(q.question)))
+        .child(h_flex().gap(8).items_start()
+          .when(Boolean(q.header), (el) => el.child(div().flex_none().mt(1).px(6).py(1).rounded(5).bg(t.raised).text_size(11).text_color(t.muted).child(q.header)))
+          .child(div().flex_1().min_w(0).text_size(13.5).font_semibold().child(q.question)))
         .child(!pending
           ? settled(answer ? `→ ${answer}` : "Skipped", t)
           : v_flex().gap(4)
@@ -67,7 +78,7 @@ export function questionCard(item, t, view) {
                 .border_1().border_color(on ? t.accent : t.border).bg(on ? t.selected : t.background)
                 .hover((s) => s.bg(t.hover))
                 .on_click((_e, cx) => view.pick(item, q, o.label, single, cx))
-                .child(div().w(16).text_size(12).text_color(on ? t.accent : t.dim).child(q.multiSelect ? (on ? "☑" : "☐") : on ? "◉" : "○"))
+                .child(div().w(16).flex_none().text_size(12).text_color(on ? t.accent : t.dim).child(q.multiSelect ? (on ? "☑" : "☐") : on ? "◉" : "○"))
                 .child(v_flex().flex_1().min_w(0)
                   .child(div().text_size(13).child(o.label))
                   .when(Boolean(o.description), (el) => el.child(div().text_size(12).text_color(t.dim).child(o.description))));
@@ -76,8 +87,11 @@ export function questionCard(item, t, view) {
               h_flex().h(32).px(10).items_center().rounded(8).border_1().border_color(t.border).bg(t.background)
                 .child(Input.new(inputs[qi]).flex_1().text_size(13)))));
     }))
-    .when(pending, (el) => el.child(h_flex().gap(8)
-      .when(!single, (el) => el.child(button(`submit-${item.id}`, "Submit", t, "primary", (_e, cx) => view.submitQuestion(item, cx))))
+    .when(pending, (el) => el.child(h_flex().gap(8).items_center()
+      .when(total > 1 && page > 0, (el) => el.child(button(`back-${item.id}`, "Back", t, "", go(page - 1))))
+      .when(total > 1 && page < total - 1, (el) => el.child(button(`next-${item.id}`, "Next", t, "primary", go(page + 1))))
+      .when(!single && page === total - 1, (el) => el.child(button(`submit-${item.id}`, "Submit", t, "primary", (_e, cx) => view.submitQuestion(item, cx))))
       .when(single, (el) => el.child(div().text_size(11.5).text_color(t.dim).child("Pick one, or type an answer and press Enter")))
+      .child(div().flex_1())
       .child(button(`skip-${item.id}`, "Skip", t, "", (_e, cx) => view.answer({ item: item.id, answers: null }, cx))))));
 }
