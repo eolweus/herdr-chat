@@ -1,8 +1,15 @@
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, exec, focused, home, panes, run, setShared, shared, theme } from "herdr";
+import { agents, appHome, exec, focused, home, panes, run, setShared, shared, theme } from "herdr";
 import { TerminalSession } from "./terminal.js";
 import { machineColor } from "./composer.js";
+
+// herdr-mods' files-work also previews images and PDFs and opens nvim; use it when it's installed.
+let filesWork = false;
+exec("test", ["-e", `${appHome()}/mods/files-work/mod.json`]).then((r) => (filesWork = r.code === 0), () => {});
+const openFile = (path, machine) => run("pane.split", filesWork
+  ? { direction: "right", mod: "files-work", props: { path, machine } }
+  : { direction: "right", mod: "herdr-chat", props: { file: path, machine } });
 
 const fmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1)}k` : String(n));
 
@@ -99,7 +106,7 @@ export class Panel {
       .when(!a.outputs?.length, (el) => el.child(div().text_size(12).text_color(t.dim).child("Files Claude creates or edits show up here.")))
       .children((a.outputs ?? []).map((o, i) => h_flex().id(`out-${i}`).gap(10).items_center().min_w(0).text_size(12.5).py(2).rounded(6)
         .cursor_pointer().hover((s) => s.bg(t.hover))
-        .on_click(() => run("pane.split", { direction: "right", mod: "herdr-chat", props: { file: o.path, machine: a.machine ?? null } }))
+        .on_click(() => openFile(o.path, a.machine ?? null))
         .child(svg(`mods/herdr-chat/icons/${o.created ? "file" : "square-pen"}.svg`).size(14).flex_none().text_color(t.dim))
         .child(div().flex_1().min_w(0).truncate().child(o.name))
         .when(o.add > 0, (el) => el.child(div().text_size(11.5).text_color(t.ansi2).child(`+${o.add}`)))
