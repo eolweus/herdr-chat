@@ -8,7 +8,7 @@ import { ReplaySession } from "./src/replay";
 import { refreshLimits } from "./src/limits";
 import { projectServers } from "./src/projects";
 
-const PROTOCOL = 2;
+const PROTOCOL = 3;
 const HOME = process.env.HOME!;
 const PORT = Number(process.env.HERDR_CHAT_PORT ?? 7777);
 const HOSTS = (process.env.HERDR_CHAT_HOSTS ?? "127.0.0.1").split(",").filter(Boolean);
@@ -110,6 +110,8 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
   }
   const s = d.session;
   if (!s) return;
+  if (m.type === "older") return ws.send(JSON.stringify(s.older(String(m.before))));
+  if (m.type === "image") return ws.send(JSON.stringify(s.image(String(m.item), Number(m.i))));
   if (m.type === "sessions") {
     const list = replay >= 0 ? [] : await listSessions({ dir: s.cwd, limit: 12 }).catch(() => []);
     const sessions = list.filter((x) => x.sessionId !== s.state.session && !x.archived).map((x) => ({

@@ -1,7 +1,7 @@
 import { forkSession, getSessionInfo, getSessionMessages, query, type PermissionResult, type PermissionUpdate, type Query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import type { Image, Item, McpServer, McpTool, State } from "./items";
+import type { Image, Item, McpServer, McpTool, Output, State } from "./items";
 import { Normalizer, commandsOf } from "./normalizer";
 import { describe } from "./tools";
 import { refreshLimits } from "./limits";
@@ -42,6 +42,36 @@ const defaultMode = (): string => userSettings().permissions?.defaultMode ?? "de
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const CLAUDE = Bun.which("claude") ?? `${process.env.HOME}/.local/bin/claude`;
 const RECORD = process.env.HERDR_CHAT_RECORD;
+const PAGE_ITEMS = 80, PAGE_BYTES = 1_500_000;
+
+const EDITS = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
+const edited = (i: Item) => i.kind === "tool" && i.status === "ok" && Boolean(i.path) && EDITS.includes(i.name);
+
+function outputsOf(items: Item[]): Output[] {
+  const files = new Map<string, Output>();
+  for (const i of items) {
+    if (i.kind !== "tool" || !edited(i)) continue;
+    const f = files.get(i.path!) ?? { path: i.path!, name: i.meta ?? i.path!, created: i.name === "Write", add: 0, del: 0 };
+    for (const l of (i.detail ?? "").split("\n")) {
+      if (l.startsWith("+")) f.add++;
+      else if (l.startsWith("-")) f.del++;
+    }
+    files.delete(i.path!);
+    files.set(i.path!, f);
+  }
+  return [...files.values()].reverse();
+}
+
+const firstOf = (items: Item[]) => {
+  const u = items.find((i) => i.kind === "user" && !/^(<!-- herdr-chat:run -->|I ran:\n```sh\n)/.test(i.text ?? "") && !(i.text ?? "").slice(0, 300).includes("This session is being continued"));
+  return u?.kind === "user" ? u.text.split("\n")[0]!.slice(0, 200) : null;
+};
+
+// Image data stays here; panes ask for it with { type: "image" } when it's on screen.
+const wire = (item: Item): Item => {
+  const images = (item as { images?: Image[] }).images;
+  return images?.length ? { ...item, images: images.map((img) => ({ type: img.type, data: "" })) } as Item : item;
+};
 
 export function inbox<T>() {
   const queue: T[] = [];
@@ -98,6 +128,7 @@ export class Session {
     this.title();
     try {
       for (const m of await getSessionMessages(id, { dir: this.cwd, includeSystemMessages: true })) this.n.feed({ ...m, isReplay: true });
+      this.n.setState({ outputs: outputsOf(this.n.items), first: firstOf(this.n.items) });
     } catch (e) {
       this.n.notice("error", `Couldn't load the earlier conversation: ${e}`);
     }
@@ -123,25 +154,38 @@ export class Session {
     if (title && title !== this.state.title) { this.n.setState({ title }); this.onSession(this); }
   }
 
+  // Panes get the newest items and page in older ones as they scroll, and images only when shown:
   // Herdr's websocket drops messages over about 8 MB, and Read screenshots make long chats bigger than that.
-  // The newest items go first, so the end of the chat shows while older batches load above it.
   snapshot() {
-    const batches: Item[][] = [];
-    let batch: Item[] = [], size = 0;
-    for (const item of [...this.n.items].reverse()) {
-      const n = JSON.stringify(item).length;
-      if (size + n > 2_000_000 && batch.length) { batches.push(batch.reverse()); batch = []; size = 0; }
-      batch.push(item);
-      size += n;
+    const { items, older } = this.page(this.n.items.length);
+    return { type: "snapshot", items, older, state: this.state, cwd: this.cwd, handoff: this.handoff };
+  }
+
+  page(end: number) {
+    const items: Item[] = [];
+    let size = 0, i = end;
+    while (i > 0 && items.length < PAGE_ITEMS) {
+      const item = wire(this.n.items[i - 1]!);
+      size += JSON.stringify(item).length;
+      if (size > PAGE_BYTES && items.length) break;
+      items.unshift(item);
+      i--;
     }
-    batches.push(batch.reverse());
-    return batches.map((items, i) => i === 0
-      ? { type: "snapshot", items, more: batches.length > 1, state: this.state, cwd: this.cwd, handoff: this.handoff }
-      : { type: "items", items, more: i < batches.length - 1 });
+    return { items, older: i > 0 };
+  }
+
+  older(before: string) {
+    const end = this.n.items.findIndex((i) => i.id === before);
+    return { type: "older", before, ...(end < 0 ? { items: [], older: false } : this.page(end)) };
+  }
+
+  image(id: string, i: number) {
+    const img = (this.n.get(id) as { images?: Image[] } | undefined)?.images?.[i];
+    return { type: "image", item: id, i, mime: img?.type ?? null, data: img?.data ?? null };
   }
 
   sendSnapshot(c: Client) {
-    for (const m of this.snapshot()) c.send(m);
+    c.send(this.snapshot());
   }
 
   get activity(): "blocked" | "working" | "idle" {
@@ -169,9 +213,12 @@ export class Session {
     this.timer = null;
     const ids = [...this.n.dirty];
     this.n.dirty.clear();
+    const changed = ids.map((id) => this.n.get(id));
+    if (changed.some((i) => i && edited(i))) this.n.setState({ outputs: outputsOf(this.n.items) });
+    if (!this.state.first && changed.some((i) => i?.kind === "user")) this.n.setState({ first: firstOf(this.n.items) });
     for (const id of ids) {
       const item = this.n.get(id);
-      if (item) this.broadcast({ type: "upsert", item });
+      if (item) this.broadcast({ type: "upsert", item: wire(item) });
     }
     if (this.n.stateDirty) {
       this.n.stateDirty = false;

@@ -70,7 +70,13 @@ export type State = {
   worktree: boolean;
   ultracode: boolean;
   fast: boolean;
+  /** Files written or edited anywhere in the chat, newest first; panes hold only part of it. */
+  outputs: Output[];
+  /** The first message, a title until the session has one. */
+  first: string | null;
 };
+
+export type Output = { path: string; name: string; created: boolean; add: number; del: number };
 
 export type Mcp = { name: string; label: string };
 export type McpServer = Mcp & {

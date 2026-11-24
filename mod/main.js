@@ -19,6 +19,7 @@ import { FileLinks, openFile } from "./filelinks.js";
 
 const DATA = "data/herdr-chat";
 const IMAGE_EXT = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
+const imageRel = (id, i, type) => `${DATA}/img/${safe(id)}-${i}.${IMAGE_EXT[type] ?? "png"}`;
 const MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
 const PASTE = `ObjC.import("AppKit");
 function run(argv) {
@@ -69,6 +70,8 @@ export default class HerdrChat extends View {
     this.qPage = new Map();
     this.otherInputs = new Map();
     this.images = new Map();
+    this.asked = new Set();
+    this.heights = new Map();
     this.originals = new Set();
     this.runs = new Map();
     this.attachments = [];
@@ -124,6 +127,7 @@ export default class HerdrChat extends View {
   }
 
   outputs() {
+    if (this.state.outputs) return this.state.outputs;
     const files = new Map();
     for (const i of this.items) {
       if (i.kind !== "tool" || i.status !== "ok" || !i.path || !["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(i.name)) continue;
@@ -245,7 +249,7 @@ export default class HerdrChat extends View {
   publishPane() {
     if (!this.pane || this.other) return;
     const status = this.pending() ? "blocked" : this.state.busy ? "working" : this.unseen ? "done" : null;
-    const first = this.items.find((i) => i.kind === "user" && !isRunOutput(i) && !i.text?.startsWith("This session is being continued"))?.text?.split("\n")[0] ?? null;
+    const first = this.state.first ?? this.items.find((i) => i.kind === "user" && !isRunOutput(i) && !i.text?.startsWith("This session is being continued"))?.text?.split("\n")[0] ?? null;
     const title = this.handoff?.title ?? this.state.title ?? (first && first.slice(0, 80));
     this.nameTab(this.handoff?.title ?? this.state.title ?? first, first);
     const json = JSON.stringify({ folder: tilde(this.cwd, this.home), cwd: this.cwd, status, title, named: Boolean(this.state.title) });
@@ -337,17 +341,30 @@ export default class HerdrChat extends View {
       this.handoff = m.handoff ?? null;
       this.items = [];
       this.byId.clear();
+      this.staged = null;
+      this.loadingOlder = false;
+      this.olderAvailable = Boolean(m.older);
+      this.asked.clear();
       for (const item of m.items) await this.upsert(item, false);
       this.setState(m.state);
       this.stick = true;
       this.recent = null;
       if (!this.items.length && this.resumeId) { this.send({ type: "resume", id: this.resumeId }); this.resumeId = null; }
       else if (!this.items.length) this.send({ type: "sessions" });
-    } else if (m.type === "items") {
-      // A later snapshot batch holds older items, which go above what's shown.
-      const n = this.items.length;
+    } else if (m.type === "older") {
+      this.loadingOlder = false;
+      if (m.before !== this.items[0]?.id) return;
+      this.olderAvailable = Boolean(m.older);
+      const n = this.items.length, following = this.following;
       for (const item of m.items) await this.upsert(item, false);
-      this.items = [...this.items.slice(n), ...this.items.slice(0, n)];
+      const older = this.items.splice(n);
+      // Read from the bottom, older items can just go above; otherwise they're measured first (see commitOlder).
+      if (following || !older.length) this.items = [...older, ...this.items];
+      else { this.staged = older; this.loadingOlder = true; }
+    } else if (m.type === "image") {
+      if (!m.data) return;
+      const rel = imageRel(m.item, m.i, m.mime);
+      await fs.writeFile(`${appHome()}/${rel}`, Buffer.from(m.data, "base64")).then(() => this.images.set(`${m.item}:${m.i}`, rel), () => {});
     } else if (m.type === "sessions") this.recent = m.sessions;
     else if (m.type === "rewind_check" && this.confirm?.id === m.id) this.confirm.files = m.files;
     else if (m.type === "forked" && this.forking?.id === m.id) {
@@ -390,7 +407,7 @@ export default class HerdrChat extends View {
     }
     if (item.kind === "question" && item.state === "pending" && !this.otherInputs.has(item.id)) this.prepareQuestion(item);
     if (item.kind === "tool" && this.expanded.has(item.id) && item.detail) this.codes.prepare(`detail:${item.id}`, this.detailLang(item.name), item.detail, t);
-    if (item.images?.length) await this.saveImages(item);
+    if (item.images?.some((img) => img.data)) await this.saveImages(item);
     if (live && !prev && (item.kind === "permission" || item.kind === "question") && item.state === "pending") this.alert(item);
     if (item.kind === "permission" || item.kind === "question") this.publishPane();
     if (this.following) this.stick = true;
@@ -419,12 +436,62 @@ export default class HerdrChat extends View {
     for (const [i, img] of item.images.entries()) {
       const key = `${item.id}:${i}`;
       if (this.images.has(key)) continue;
-      const rel = `${DATA}/img/${safe(item.id)}-${i}.${IMAGE_EXT[img.type] ?? "png"}`;
+      if (!img.data) continue;
+      const rel = imageRel(item.id, i, img.type);
       try {
         await fs.writeFile(`${appHome()}/${rel}`, Buffer.from(img.data, "base64"));
         this.images.set(key, rel);
       } catch {}
     }
+  }
+
+  // The engine sends a page of older items when the top comes near, and image data only when asked.
+  pageAndImages(cx) {
+    const y = this.scroll.offset().y, viewH = this.scroll.viewport_size().height;
+    if (!viewH) return;
+    if (this.olderAvailable && !this.loadingOlder && this.items.length && y < viewH * 1.5) {
+      this.loadingOlder = true;
+      this.send({ type: "older", before: this.items[0].id });
+    }
+    const zoom = settings().zoom || 1;
+    let top = 10;
+    for (const b of this.lastShown ?? []) {
+      const h = (this.heights.get(b.id) ?? 0) / zoom;
+      if (top > y + 2 * viewH) break;
+      if (top + h >= y - viewH) for (const item of this.blockItems(b)) this.fetchImages(item, cx);
+      top += h;
+    }
+  }
+
+  blockItems(b) {
+    const own = b.kind === "group" ? b.items : b.kind === "handoff" ? [b.item] : [b];
+    return own.flatMap((i) => [i, ...(this.childMap?.get(i.id) ?? [])]);
+  }
+
+  fetchImages(item, cx) {
+    for (const [i, img] of (item.images ?? []).entries()) {
+      const key = `${item.id}:${i}`;
+      if (this.images.has(key) || this.asked.has(key)) continue;
+      this.asked.add(key);
+      const rel = imageRel(item.id, i, img.type);
+      cx.spawn(async (cx) => {
+        if (await fs.exists(`${appHome()}/${rel}`).catch(() => false)) { this.images.set(key, rel); cx.notify(); }
+        else this.send({ type: "image", item: item.id, i });
+      });
+    }
+  }
+
+  // An older page is drawn invisibly first; once its height is known it goes above, and the view moves down by as much.
+  commitOlder(height, cx) {
+    if (!this.staged) return;
+    const zoom = settings().zoom || 1, h = height / zoom;
+    const y = this.scroll.offset().y, viewH = this.scroll.viewport_size().height;
+    this.items = [...this.staged, ...this.items];
+    this.staged = null;
+    this.loadingOlder = false;
+    this.restore = y + h + viewH;
+    if (this.contentH) this.contentH += height;
+    cx.notify();
   }
 
   imagePath(id, i) {
@@ -937,9 +1004,16 @@ export default class HerdrChat extends View {
     this.takePick();
     const t = theme();
     const children = new Map();
-    for (const i of this.items) if (i.kind === "tool" && i.parent) children.set(i.parent, [...(children.get(i.parent) ?? []), i]);
+    for (const i of this.staged ? [...this.staged, ...this.items] : this.items) if (i.kind === "tool" && i.parent) children.set(i.parent, [...(children.get(i.parent) ?? []), i]);
+    this.childMap = children;
     if (this.expandAll) for (const i of this.items) this.expanded.add(i.id);
-    const shown = this.blocks(this.items.filter((i) => !isRunOutput(i) && !(i.kind === "tool" && i.parent && this.byId.has(i.parent))));
+    const visible = (list) => this.blocks(list.filter((i) => !isRunOutput(i) && !(i.kind === "tool" && i.parent && this.byId.has(i.parent))));
+    const shown = visible(this.items);
+    this.lastShown = shown;
+    const staged = this.staged ? visible(this.staged) : null;
+    const restore = this.restore;
+    this.restore = null;
+    if (restore) this.scroll.scroll_to_item(2);
     if (this.stick && shown.length) {
       this.scroll.scroll_to_item(1);
       this.stick = false;
@@ -947,10 +1021,17 @@ export default class HerdrChat extends View {
     const transcript = v_flex().id("transcript").flex_1().min_h(0).overflow_y_scrollbar().track_scroll(this.scroll).pt(10)
       .on_scroll_wheel((e, cx) => this.wheel(e, cx))
       .on_size_change((size) => { this.viewH = size.height; })
-      .child(v_flex().id("transcript-content").w_full().items_center()
+      .child(v_flex().id("transcript-content").relative().w_full().items_center()
         .on_size_change((size) => this.grew(size.height))
-        .children(shown.map((i) => this.renderItem(i, t, children).max_w(880))))
-      .child(div().h(8));
+        .children(shown.map((i) => v_flex().id(`row-${i.id}`).w_full().items_center()
+          .on_size_change((size) => this.heights.set(i.id, size.height))
+          .child(this.renderItem(i, t, children).max_w(880))))
+        .when(Boolean(staged), (el) => el.child(v_flex().id("staged").absolute().top(0).left(0).right(0).items_center().invisible()
+          .on_size_change((size, cx) => this.commitOlder(size.height, cx))
+          .children((staged ?? []).map((i) => this.renderItem(i, t, children).max_w(880))))))
+      .child(div().h(8))
+      // Revealing this marker scrolls by exactly the height the older page added.
+      .when(Boolean(restore), (el) => el.child(div().absolute().top(restore - 1).left(0).w(1).h(1)));
     return v_flex().id("root").track_focus(this.handle).size_full().bg(t.background).text_color(t.foreground)
       .on_key_down((e, cx) => this.key(e, cx))
       .on_drop((e, cx) => cx.spawn(async (cx) => this.drop(e.paths, cx)))
