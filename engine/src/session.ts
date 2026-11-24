@@ -124,16 +124,17 @@ export class Session {
   }
 
   // Herdr's websocket drops messages over about 8 MB, and Read screenshots make long chats bigger than that.
+  // The newest items go first, so the end of the chat shows while older batches load above it.
   snapshot() {
     const batches: Item[][] = [];
     let batch: Item[] = [], size = 0;
-    for (const item of this.n.items) {
+    for (const item of [...this.n.items].reverse()) {
       const n = JSON.stringify(item).length;
-      if (size + n > 2_000_000 && batch.length) { batches.push(batch); batch = []; size = 0; }
+      if (size + n > 2_000_000 && batch.length) { batches.push(batch.reverse()); batch = []; size = 0; }
       batch.push(item);
       size += n;
     }
-    batches.push(batch);
+    batches.push(batch.reverse());
     return batches.map((items, i) => i === 0
       ? { type: "snapshot", items, more: batches.length > 1, state: this.state, cwd: this.cwd, handoff: this.handoff }
       : { type: "items", items, more: i < batches.length - 1 });

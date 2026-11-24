@@ -344,7 +344,10 @@ export default class HerdrChat extends View {
       if (!this.items.length && this.resumeId) { this.send({ type: "resume", id: this.resumeId }); this.resumeId = null; }
       else if (!this.items.length) this.send({ type: "sessions" });
     } else if (m.type === "items") {
+      // A later snapshot batch holds older items, which go above what's shown.
+      const n = this.items.length;
       for (const item of m.items) await this.upsert(item, false);
+      this.items = [...this.items.slice(n), ...this.items.slice(0, n)];
     } else if (m.type === "sessions") this.recent = m.sessions;
     else if (m.type === "rewind_check" && this.confirm?.id === m.id) this.confirm.files = m.files;
     else if (m.type === "forked" && this.forking?.id === m.id) {
