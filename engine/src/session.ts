@@ -224,7 +224,7 @@ export class Session {
         permissionMode: this.options.permissionMode as any,
         model: this.options.model,
         enableFileCheckpointing: true,
-        canUseTool: (tool, input, opts) => this.ask(tool, input, opts.toolUseID, opts.suggestions),
+        canUseTool: (tool, input, opts) => this.ask(tool, input, opts.toolUseID, opts.suggestions, opts.signal),
       },
     });
     this.q = q;
@@ -387,7 +387,7 @@ export class Session {
     } catch {}
   }
 
-  protected ask(tool: string, input: Record<string, unknown>, toolUseID: string, suggestions?: PermissionUpdate[]): Promise<PermissionResult> {
+  protected ask(tool: string, input: Record<string, unknown>, toolUseID: string, suggestions?: PermissionUpdate[], signal?: AbortSignal): Promise<PermissionResult> {
     if (RECORD) appendFileSync(`${RECORD}/${this.key}.jsonl`, JSON.stringify({ type: "_ask", tool, input, toolUseID, suggestions }) + "\n");
     return new Promise((resolve) => {
       let item: Item;
@@ -406,7 +406,22 @@ export class Session {
       this.pending.set(item.id, { resolve, input, suggestions, tool: toolUseID });
       this.n.upsert(item);
       this.flush();
+      // Claude withdraws a prompt it settled itself (e.g. auto mode's check approving it).
+      signal?.addEventListener("abort", () => this.withdraw(item.id), { once: true });
     });
+  }
+
+  private withdraw(id: string) {
+    const p = this.pending.get(id);
+    const item = this.n.get(id);
+    if (!p || (item?.kind !== "permission" && item?.kind !== "question")) return;
+    this.pending.delete(id);
+    item.state = "withdrawn";
+    this.n.touch(item);
+    const row = p.tool ? this.n.get(p.tool) : undefined;
+    if (row?.kind === "tool" && row.status === "waiting") { row.status = "running"; this.n.touch(row); }
+    p.resolve({ behavior: "deny", message: "Withdrawn" });
+    this.schedule();
   }
 
   answer(a: Answer) {

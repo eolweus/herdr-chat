@@ -36,13 +36,13 @@ export type Item =
       detail?: string;
       plan?: string;
       remember: boolean;
-      state: "pending" | "allowed" | "denied";
+      state: "pending" | "allowed" | "denied" | "withdrawn";
     }
   | {
       id: string;
       kind: "question";
       questions: Question[];
-      state: "pending" | "answered" | "skipped";
+      state: "pending" | "answered" | "skipped" | "withdrawn";
       answers?: Record<string, string>;
     }
   | { id: string; kind: "notice"; level: "info" | "warning" | "error"; text: string }
