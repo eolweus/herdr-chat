@@ -128,7 +128,7 @@ export function toolRow(item, t, view, children) {
         return path
           ? div().id(`timg-${item.id}-${i}`).w(240).h(150).rounded(8).overflow_hidden().border_1().border_color(t.border).cursor_pointer()
             .on_click(() => view.viewTools([{ id: item.id, i, path }], 0)).child(image(path).size_full())
-          : div();
+          : div().w(240).h(150).rounded(8).bg(t.surface);
       }))))));
 }
 
