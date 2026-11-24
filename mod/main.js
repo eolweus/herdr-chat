@@ -356,12 +356,10 @@ export default class HerdrChat extends View {
       this.loadingOlder = false;
       if (m.before !== this.items[0]?.id) return;
       this.olderAvailable = Boolean(m.older);
-      const n = this.items.length, following = this.following;
+      const n = this.items.length;
       for (const item of m.items) await this.upsert(item, false);
       const older = this.items.splice(n);
-      // Read from the bottom, older items can just go above; otherwise they're measured first (see commitOlder).
-      if (following || !older.length) this.items = [...older, ...this.items];
-      else { this.staged = older; this.loadingOlder = true; }
+      if (older.length) { this.staged = older; this.loadingOlder = true; }
     } else if (m.type === "image") {
       if (!m.data) return;
       const rel = imageRel(m.item, m.i, m.mime);
@@ -451,6 +449,7 @@ export default class HerdrChat extends View {
     const y = this.scroll.offset().y, viewH = this.scroll.viewport_size().height;
     if (!viewH) return;
     const r = this.restore;
+    if (this.following && !r && y + viewH < this.scroll.content_size().height - 2) { this.stick = true; cx.notify(); }
     if (r?.merged) {
       if (Math.abs(y - r.target) < 2 || ++r.tries > 10) { this.restore = null; this.loadingOlder = false; }
       cx.notify();
@@ -1030,7 +1029,7 @@ export default class HerdrChat extends View {
     const staged = this.staged ? visible(this.staged) : null;
     const restore = this.restore;
     if (restore?.merged) this.scroll.scroll_to_item(2);
-    if (this.stick && shown.length) {
+    if (this.stick && shown.length && !restore) {
       this.scroll.scroll_to_item(1);
       this.stick = false;
     }
