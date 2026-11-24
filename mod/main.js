@@ -775,6 +775,47 @@ export default class HerdrChat extends View {
     cx.notify();
   }
 
+  // Opens the draft in $EDITOR beside the chat; saves flow back into the composer, and quitting returns here.
+  editDraft(cx) {
+    const open = this.editor && panes().find((p) => p.pane === this.editor.pane);
+    if (open) return run("pane.focus", { pane: open.pane });
+    const file = `${appHome()}/${DATA}/drafts/${(this.key ?? "draft").replace(/[^\w.-]/g, "_")}.md`;
+    const done = `${file}.done`;
+    const ed = { pane: null, file };
+    this.editor = ed;
+    cx.spawn(async (cx) => {
+      await fs.mkdir(`${appHome()}/${DATA}/drafts`, { recursive: true }).catch(() => {});
+      await fs.rm(done, { force: true }).catch(() => {});
+      let last = this.input.value();
+      await fs.writeFile(file, last);
+      const before = new Set(panes().map((p) => p.pane));
+      const tab = panes().find((p) => p.pane === this.pane)?.tab;
+      run("pane.split", { direction: "right", ...(this.pane ? { pane: this.pane } : {}), argv: ["zsh", "-lc", 'cd "$2" 2>/dev/null; ${EDITOR:-nvim} "$1"; touch "$1.done"', "zsh", file, this.machine ? home() : this.cwd ?? home()] });
+      const sync = async () => {
+        const text = (await fs.readFile(file, "utf8").catch(() => null))?.replace(/\n$/, "");
+        if (text == null || text === last) return;
+        last = text;
+        this.input.set_value(text);
+        this.input.set_selected_range({ start: text.length, end: text.length });
+        cx.notify();
+      };
+      for (let i = 0; this.editor === ed; i++) {
+        await new Promise((r) => cx.timer.after(300, r));
+        ed.pane ??= panes().find((p) => !before.has(p.pane) && p.terminal && (!tab || p.tab === tab))?.pane ?? null;
+        await sync();
+        const finished = await fs.stat(done).then(() => true, () => false);
+        const gone = ed.pane && !panes().some((p) => p.pane === ed.pane);
+        if (finished || gone || (!ed.pane && i > 30)) {
+          if (finished && ed.pane && !gone) run("pane.close", { pane: ed.pane });
+          if (this.pane) run("pane.focus", { pane: this.pane });
+          this.input.focus();
+          this.editor = null;
+          cx.notify();
+        }
+      }
+    });
+  }
+
   removeAttachment(i, cx) {
     this.attachments.splice(i, 1);
     cx.notify();
@@ -791,6 +832,7 @@ export default class HerdrChat extends View {
     else if (this.remoteMenu && e.keystroke === "escape") { this.remoteMenu = false; cx.notify(); }
     else if (e.keystroke === "escape" && this.state.busy) this.interrupt(cx);
     else if (e.keystroke === "shift-tab") this.cycleMode(cx);
+    else if (e.keystroke === "cmd-g") this.editDraft(cx);
     else return;
     cx.stop_propagation();
   }
