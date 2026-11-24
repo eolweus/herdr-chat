@@ -60,7 +60,9 @@ export class Normalizer {
   }
 
   upsert(item: Item) {
-    if (!this.byId.has(item.id)) this.items.push(item);
+    const old = this.byId.get(item.id);
+    if (!old) this.items.push(item);
+    else if (old !== item) this.items[this.items.indexOf(old)] = item;
     this.byId.set(item.id, item);
     this.dirty.add(item.id);
     return item;
