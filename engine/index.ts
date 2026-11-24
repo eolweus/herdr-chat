@@ -8,7 +8,7 @@ import { ReplaySession } from "./src/replay";
 import { refreshLimits } from "./src/limits";
 import { projectServers } from "./src/projects";
 
-const PROTOCOL = 1;
+const PROTOCOL = 2;
 const HOME = process.env.HOME!;
 const PORT = Number(process.env.HERDR_CHAT_PORT ?? 7777);
 const HOSTS = (process.env.HERDR_CHAT_HOSTS ?? "127.0.0.1").split(",").filter(Boolean);
@@ -77,7 +77,7 @@ async function reopen(d: Data, s: Session, session: string | null, cwd: string) 
   for (const c of s.clients) if (c !== d.client) next.clients.add(c);
   await next.load();
   next.attach(d.client);
-  for (const c of next.clients) if (c !== d.client) c.send(next.snapshot());
+  for (const c of next.clients) if (c !== d.client) next.sendSnapshot(c);
 }
 
 type Data = { authed: boolean; session: Session | null; client: Client };

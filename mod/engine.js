@@ -1,7 +1,7 @@
 import { InputState } from "gpui-base";
 import { appHome, exec, props, readTextFile } from "herdr";
 
-export const PROTOCOL = 1;
+export const PROTOCOL = 2;
 const PORT = 7777;
 
 export async function endpoint(machine, engine = props()?.engine) {

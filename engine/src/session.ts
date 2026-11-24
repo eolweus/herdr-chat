@@ -123,8 +123,24 @@ export class Session {
     if (title && title !== this.state.title) { this.n.setState({ title }); this.onSession(this); }
   }
 
+  // Herdr's websocket drops messages over about 8 MB, and Read screenshots make long chats bigger than that.
   snapshot() {
-    return { type: "snapshot", items: this.n.items, state: this.state, cwd: this.cwd, handoff: this.handoff };
+    const batches: Item[][] = [];
+    let batch: Item[] = [], size = 0;
+    for (const item of this.n.items) {
+      const n = JSON.stringify(item).length;
+      if (size + n > 2_000_000 && batch.length) { batches.push(batch); batch = []; size = 0; }
+      batch.push(item);
+      size += n;
+    }
+    batches.push(batch);
+    return batches.map((items, i) => i === 0
+      ? { type: "snapshot", items, more: batches.length > 1, state: this.state, cwd: this.cwd, handoff: this.handoff }
+      : { type: "items", items, more: i < batches.length - 1 });
+  }
+
+  sendSnapshot(c: Client) {
+    for (const m of this.snapshot()) c.send(m);
   }
 
   get activity(): "blocked" | "working" | "idle" {
@@ -133,7 +149,7 @@ export class Session {
 
   attach(c: Client) {
     this.clients.add(c);
-    c.send(this.snapshot());
+    this.sendSnapshot(c);
   }
 
   detach(c: Client) {
@@ -256,7 +272,7 @@ export class Session {
     if (msg.type === "system" && msg.subtype === "init" && msg.cwd && msg.cwd !== this.cwd) {
       this.cwd = msg.cwd;
       this.n.setState({ worktree: false });
-      this.broadcast(this.snapshot());
+      for (const c of this.clients) this.sendSnapshot(c);
     }
     if (msg.type === "system" && msg.subtype === "init") {
       this.loadCommands();
