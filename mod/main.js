@@ -104,7 +104,7 @@ export default class HerdrChat extends View {
     cx.spawn(async (cx) => {
       for (;;) {
         const c = await nextCommand();
-        if (c === "focus") this.input.focus();
+        if (c === "focus" && (!this.pane || this.visible())) this.input.focus();
         else if (c === "edit" && this.pane && focused()?.pane === this.pane) this.editDraft(cx);
         else if (c === "compact" && this.active()) this.send({ type: "prompt", text: "/compact", images: [] });
         else if (c === "mcp" && this.active()) this.openMcp(null);
