@@ -96,6 +96,8 @@ export default class HerdrChat extends View {
     if (checking()) return;
     // Herdr only sends "focus" for pane.go, not for clicks, tab switches or pane.focus.
     cx.timer.every(200, () => {
+      // A new chat's input takes focus before its pane exists, so the pane is looked up once it does.
+      if (!this.pane) this.findPane();
       const shown = this.visible();
       if (shown && !this.shown) this.input.focus();
       this.shown = shown;
@@ -105,7 +107,7 @@ export default class HerdrChat extends View {
       for (;;) {
         const c = await nextCommand();
         if (c === "focus" && (!this.pane || this.visible())) this.input.focus();
-        else if (c === "edit" && this.pane && focused()?.pane === this.pane) this.editDraft(cx);
+        else if (c === "edit" && this.pane && focused()?.pane === this.pane) this.editDraft(cx).catch((e) => { this.editor = null; notify({ title: "Couldn't open the editor", body: String(e?.message ?? e), level: "error" }); });
         else if (c === "compact" && this.active()) this.send({ type: "prompt", text: "/compact", images: [] });
         else if (c === "mcp" && this.active()) this.openMcp(null);
         else if (c === "signin" && shared("herdr-chat:signin")?.key === this.key) this.signIn(shared("herdr-chat:signin").server);
@@ -786,7 +788,7 @@ export default class HerdrChat extends View {
     const ed = { pane: null, file };
     this.editor = ed;
     await fs.mkdir(`${appHome()}/${DATA}/drafts`, { recursive: true }).catch(() => {});
-    await fs.rm(done, { force: true }).catch(() => {});
+    await fs.unlink(done).catch(() => {});
     let last = this.input.value();
     await fs.writeFile(file, last);
     const before = new Set(panes().map((p) => p.pane));
@@ -804,7 +806,7 @@ export default class HerdrChat extends View {
       await new Promise((r) => cx.timer.after(300, r));
       ed.pane ??= panes().find((p) => !before.has(p.pane) && p.terminal && (!tab || p.tab === tab))?.pane ?? null;
       await sync();
-      const finished = await fs.stat(done).then(() => true, () => false);
+      const finished = await fs.exists(done).catch(() => false);
       const gone = ed.pane && !panes().some((p) => p.pane === ed.pane);
       if (finished || gone || (!ed.pane && i > 30)) {
         if (finished && ed.pane && !gone) run("pane.close", { pane: ed.pane });
