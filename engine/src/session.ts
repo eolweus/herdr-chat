@@ -3,7 +3,7 @@ import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { Image, Item, McpServer, McpTool, Output, State } from "./items";
 import { Normalizer, commandsOf } from "./normalizer";
-import { beforeCompacts } from "./history";
+import { beforeCompacts, savedImages } from "./history";
 import { describe } from "./tools";
 import { refreshLimits } from "./limits";
 
@@ -68,6 +68,8 @@ const firstOf = (items: Item[]) => {
   return u?.kind === "user" ? u.text.split("\n")[0]!.slice(0, 200) : null;
 };
 
+const KEEP_IMAGES = 20;
+
 // Image data stays here; panes ask for it with { type: "image" } when it's on screen.
 const wire = (item: Item): Item => {
   const images = (item as { images?: Image[] }).images;
@@ -98,6 +100,7 @@ export class Session {
   protected box = inbox<SDKUserMessage>();
   protected pending = new Map<string, Pending>();
   private queued: { id: string; text: string; images: Image[] }[] = [];
+  private holding: string[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
   private options: { permissionMode?: string; model?: string; effort?: string; flags?: Record<string, unknown> } = {};
   private loaded = false;
@@ -131,6 +134,7 @@ export class Session {
       const later = await getSessionMessages(id, { dir: this.cwd, includeSystemMessages: true });
       for (const m of [...await beforeCompacts(id, later).catch(() => []), ...later]) this.n.feed({ ...m, isReplay: true });
       this.n.setState({ outputs: outputsOf(this.n.items), first: firstOf(this.n.items) });
+      this.dropImages(this.n.items.map((i) => i.id));
     } catch (e) {
       this.n.notice("error", `Couldn't load the earlier conversation: ${e}`);
     }
@@ -181,9 +185,24 @@ export class Session {
     return { type: "older", before, ...(end < 0 ? { items: [], older: false } : this.page(end)) };
   }
 
-  image(id: string, i: number) {
-    const img = (this.n.get(id) as { images?: Image[] } | undefined)?.images?.[i];
-    return { type: "image", item: id, i, mime: img?.type ?? null, data: img?.data ?? null };
+  async image(id: string, i: number) {
+    let img = (this.n.get(id) as { images?: Image[] } | undefined)?.images?.[i];
+    if (img && !img.data && this.state.session) img = (await savedImages(this.state.session, id).catch(() => null))?.[i] ?? img;
+    return { type: "image", item: id, i, mime: img?.type ?? null, data: img?.data || null };
+  }
+
+  // Image data is the bulk of a long chat; the transcript keeps it, so only the newest stay in memory.
+  private dropImages(ids: Iterable<string>) {
+    for (const id of ids) {
+      const images = (this.n.get(id) as { images?: Image[] } | undefined)?.images;
+      if (!images?.some((img) => img.data)) continue;
+      this.holding = this.holding.filter((x) => x !== id);
+      this.holding.push(id);
+    }
+    while (this.holding.length > KEEP_IMAGES) {
+      const images = (this.n.get(this.holding.shift()!) as { images?: Image[] } | undefined)?.images;
+      for (const img of images ?? []) img.data = "";
+    }
   }
 
   sendSnapshot(c: Client) {
@@ -222,6 +241,7 @@ export class Session {
       const item = this.n.get(id);
       if (item) this.broadcast({ type: "upsert", item: wire(item) });
     }
+    this.dropImages(ids);
     if (this.n.stateDirty) {
       this.n.stateDirty = false;
       this.broadcast({ type: "state", state: this.state });

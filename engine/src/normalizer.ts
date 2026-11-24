@@ -20,7 +20,7 @@ function textOf(content: unknown): string {
   return content.filter((c) => c?.type === "text").map((c) => c.text).join("\n");
 }
 
-function imagesOf(content: unknown): Image[] {
+export function imagesOf(content: unknown): Image[] {
   if (!Array.isArray(content)) return [];
   return content
     .filter((c) => c?.type === "image" && c.source?.type === "base64")

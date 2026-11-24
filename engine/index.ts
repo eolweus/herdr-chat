@@ -111,7 +111,7 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
   const s = d.session;
   if (!s) return;
   if (m.type === "older") return ws.send(JSON.stringify(s.older(String(m.before))));
-  if (m.type === "image") return ws.send(JSON.stringify(s.image(String(m.item), Number(m.i))));
+  if (m.type === "image") return void s.image(String(m.item), Number(m.i)).then((r) => ws.send(JSON.stringify(r)));
   if (m.type === "sessions") {
     const list = replay >= 0 ? [] : await listSessions({ dir: s.cwd, limit: 12 }).catch(() => []);
     const sessions = list.filter((x) => x.sessionId !== s.state.session && !x.archived).map((x) => ({

@@ -1,13 +1,38 @@
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { imagesOf } from "./normalizer";
+import type { Image } from "./items";
+
+const files = new Map<string, string>();
 
 async function transcript(id: string): Promise<string | null> {
+  const known = files.get(id);
+  if (known) {
+    const text = await readFile(known, "utf8").catch(() => null);
+    if (text !== null) return text;
+  }
   const root = join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), "projects");
   for (const dir of await readdir(root).catch(() => [] as string[])) {
     const file = join(root, dir, `${id}.jsonl`);
     const text = await readFile(file, "utf8").catch(() => null);
-    if (text !== null) return text;
+    if (text !== null) { files.set(id, file); return text; }
+  }
+  return null;
+}
+
+// Items are tool results (by tool_use_id) or user messages (by uuid).
+export async function savedImages(session: string, item: string): Promise<Image[] | null> {
+  const text = await transcript(session);
+  if (!text) return null;
+  for (const line of text.split("\n")) {
+    if (!line.includes(item) || !line.includes('"image"')) continue;
+    let e: any;
+    try { e = JSON.parse(line); } catch { continue; }
+    const content = e.message?.content;
+    if (e.uuid === item) return imagesOf(content);
+    const r = Array.isArray(content) && content.find((c: any) => c?.type === "tool_result" && c.tool_use_id === item);
+    if (r) return imagesOf(r.content);
   }
   return null;
 }
