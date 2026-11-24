@@ -54,10 +54,10 @@ export function openHandoff(h, near) {
 
 function state(h, t) {
   if (!h) return div().flex_none().text_size(12).text_color(t.dim).child("Closed");
-  if (h.result === "done") return div().flex_none().text_size(12).font_semibold().text_color(HANDOFF).child("✓ Done");
-  if (h.result === "failed") return div().flex_none().text_size(12).font_semibold().text_color(t.ansi1).child("✗ Failed");
   if (h.status === "blocked") return div().flex_none().px(6).h(17).rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).flex().items_center().child("Needs you");
   if (h.status === "working") return div().flex_none().text_size(12).text_color(t.working).child("Working…");
+  if (h.result === "done") return div().flex_none().text_size(12).font_semibold().text_color(HANDOFF).child("✓ Done");
+  if (h.result === "failed") return div().flex_none().text_size(12).font_semibold().text_color(t.ansi1).child("✗ Failed");
   return div().flex_none().text_size(12).text_color(t.dim).child("Idle");
 }
 
