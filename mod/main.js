@@ -342,6 +342,7 @@ export default class HerdrChat extends View {
       this.items = [];
       this.byId.clear();
       this.staged = null;
+      this.restore = null;
       this.loadingOlder = false;
       this.olderAvailable = Boolean(m.older);
       this.asked.clear();
@@ -449,7 +450,14 @@ export default class HerdrChat extends View {
   pageAndImages(cx) {
     const y = this.scroll.offset().y, viewH = this.scroll.viewport_size().height;
     if (!viewH) return;
-    if (this.olderAvailable && !this.loadingOlder && this.items.length && y < viewH * 1.5) {
+    const r = this.restore;
+    if (r?.merged) {
+      if (Math.abs(y - r.target) < 2 || ++r.tries > 10) { this.restore = null; this.loadingOlder = false; }
+      cx.notify();
+    }
+    // Without a scroll since the last page, a page that failed to keep the view in place would pull in the next one.
+    const asked = this.following || (this.wheeledAt ?? 0) > (this.committedAt ?? 0);
+    if (this.olderAvailable && !this.loadingOlder && asked && this.items.length && y < viewH * 1.5) {
       this.loadingOlder = true;
       this.send({ type: "older", before: this.items[0].id });
     }
@@ -482,15 +490,23 @@ export default class HerdrChat extends View {
   }
 
   // An older page is drawn invisibly first; once its height is known it goes above, and the view moves down by as much.
+  // The marker is laid out a frame before the page goes in, so a scroll request can find it whenever Herdr runs it.
   commitOlder(height, cx) {
-    if (!this.staged) return;
+    if (!this.staged || this.restore) return;
     const zoom = settings().zoom || 1, h = height / zoom;
     const y = this.scroll.offset().y, viewH = this.scroll.viewport_size().height;
+    this.restore = { at: y + h + viewH, target: y + h, height, merged: false, tries: 0, n: (this.restores = (this.restores ?? 0) + 1) };
+    cx.notify();
+  }
+
+  mergeOlder(cx) {
+    const r = this.restore;
+    if (!r || r.merged || !this.staged) return;
     this.items = [...this.staged, ...this.items];
     this.staged = null;
-    this.loadingOlder = false;
-    this.restore = y + h + viewH;
-    if (this.contentH) this.contentH += height;
+    r.merged = true;
+    this.committedAt = Date.now();
+    if (this.contentH) this.contentH += r.height;
     cx.notify();
   }
 
@@ -921,6 +937,7 @@ export default class HerdrChat extends View {
 
   // GPUI doesn't report the scroll offset, so the distance from the bottom is tracked from wheel moves.
   wheel(e, cx) {
+    this.wheeledAt = Date.now();
     const max = Math.max(0, (this.contentH ?? 0) + 18 - (this.viewH ?? 0));
     if (this.following) {
       if (e.delta.y <= 0 || !max) return;
@@ -1012,8 +1029,7 @@ export default class HerdrChat extends View {
     this.lastShown = shown;
     const staged = this.staged ? visible(this.staged) : null;
     const restore = this.restore;
-    this.restore = null;
-    if (restore) this.scroll.scroll_to_item(2);
+    if (restore?.merged) this.scroll.scroll_to_item(2);
     if (this.stick && shown.length) {
       this.scroll.scroll_to_item(1);
       this.stick = false;
@@ -1031,7 +1047,8 @@ export default class HerdrChat extends View {
           .children((staged ?? []).map((i) => this.renderItem(i, t, children).max_w(880))))))
       .child(div().h(8))
       // Revealing this marker scrolls by exactly the height the older page added.
-      .when(Boolean(restore), (el) => el.child(div().absolute().top(restore - 1).left(0).w(1).h(1)));
+      .when(Boolean(restore), (el) => el.child(div().id(`restore-${restore.n}`).absolute().top(restore.at - 1).left(0).w(1).h(1)
+        .on_size_change((_s, cx) => this.mergeOlder(cx))));
     return v_flex().id("root").track_focus(this.handle).size_full().bg(t.background).text_color(t.foreground)
       .on_key_down((e, cx) => this.key(e, cx))
       .on_drop((e, cx) => cx.spawn(async (cx) => this.drop(e.paths, cx)))
