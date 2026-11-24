@@ -230,6 +230,7 @@ export class Normalizer {
 
   private user(msg: Msg) {
     if (msg.isSynthetic) return;
+    if (msg.isCompactSummary) return msg.isReplay ? this.notice("info", "Compacted the conversation") : undefined;
     const content = msg.message?.content;
     const results = Array.isArray(content) ? content.filter((c) => c?.type === "tool_result") : [];
     for (const r of results) {
