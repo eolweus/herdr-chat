@@ -2,7 +2,7 @@
 
 A Claude Code chat pane for the Herdr app that feels like the Claude desktop app's Code view.
 A pane sits in a tab next to terminals, runs on the user's Claude plan, and works for
-spaces on this Mac and on munin.
+spaces on this Mac and on a Linux server.
 
 ## What the spike proved (2026-11-18)
 
@@ -17,7 +17,7 @@ Still unproven: the permission-card click path, Enter-to-send in `Textarea`, and
 
 ## Status (2026-11-18)
 
-Milestone 1 is built and running as services on the Mac (launchd) and munin (systemd), plus
+Milestone 1 is built and running as services on the Mac (launchd) and a Linux server (systemd), plus
 parts of milestone 2: grouped tool lines with screenshot thumbnails and a photo viewer, a side
 panel (environment, context by category, outputs) toggled from the tab bar, a slash command
 picker, a model picker, recent sessions to resume, and tab naming. Not yet checked by hand:
@@ -30,7 +30,7 @@ test/fixtures/rich.jsonl`, then a pane with props `{engine: "ws://127.0.0.1:7778
 ## Architecture
 
 ```
-Herdr app (Mac)                               machine running Claude (Mac or munin)
+Herdr app (Mac)                               machine running Claude (Mac or Linux)
 ┌────────────────────────────┐   WebSocket    ┌──────────────────────────────────┐
 │ mod: herdr-chat (pane)     │ ─────────────► │ engine (Bun, long-lived service) │
 │  renders items, composer,  │ ◄───────────── │  sessions ─► Agent SDK ─► claude │
@@ -40,7 +40,7 @@ Herdr app (Mac)                               machine running Claude (Mac or mun
 
 ### Engine (`engine/`)
 
-- **One engine per machine.** It runs as a user service: launchd on the Mac, a systemd user unit on munin.
+- **One engine per machine.** It runs as a user service: launchd on the Mac, a systemd user unit on Linux.
   Sessions live in the engine, not in the WebSocket. Closing the pane or restarting the app leaves
   a running turn running.
 - **Sessions are keyed by Claude's session id.** The engine keeps a `pane → session` map in
@@ -106,7 +106,7 @@ Look:
   `{mod: "herdr-chat", props: {machine, cwd}}`, taken from the focused space.
 - The `machine` prop chooses the engine:
   - local → `127.0.0.1:7777`
-  - munin → its WireGuard address, from `data/herdr-chat/machines.json`
+  - a remote machine → its address, from `data/herdr-chat/machines.json`
 - The token is read from `~/.config/herdr-chat/token` on that machine with `readTextFile(path, {on: machine})`.
   The secret never has to be copied by hand.
 - The engine binds to localhost plus the WireGuard interface only.
@@ -135,7 +135,7 @@ Look:
    - a mode picker (default / acceptEdits / plan / bypass) and a model picker
    - a context meter
 8. **Alerts:** `notify()` with a click-through to the pane when a card needs the user and the pane isn't visible.
-9. **Remote:** the engine as a systemd user unit on munin, the machines map, verified over WireGuard.
+9. **Remote:** the engine as a systemd user unit on Linux, the machines map, verified over WireGuard.
 10. **Install:** `scripts/install.sh` installs the launchd/systemd unit, writes the token and links the mod.
     It lives in this repo; the unit files go through dotfiles if the user wants.
 
@@ -153,7 +153,7 @@ Look:
 - `bun test` covers the normalizer against fixtures, one per tool type and card kind.
 - `herdr-app check` runs after every mod change. `herdr-app shot` and the replay harness give
   visual checks without spending usage.
-- Each milestone-1 item ends with a real session in a Herdr pane, on the Mac and on munin.
+- Each milestone-1 item ends with a real session in a Herdr pane, on the Mac and on a Linux server.
 
 ## Risks and open questions
 
@@ -163,4 +163,4 @@ Look:
 - **Enter in `Textarea`:** whether `submit` fires on Enter is unverified. If not, handle keys on the wrapping element.
 - **Not in the agents list:** a mod pane isn't a terminal, so it won't appear in Herdr's agents list or
   status dots (OSC 7501). Alerts use `notify`/`setBadge` until there's a better hook.
-- **WireGuard down:** munin panes show a clear "can't reach munin" state instead of hanging.
+- **Remote machine unreachable:** remote panes show a clear "can't reach <machine>" state instead of hanging.
