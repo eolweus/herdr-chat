@@ -98,6 +98,10 @@ export class Session {
     this.title();
     try {
       for (const m of await getSessionMessages(id, { dir: this.cwd, includeSystemMessages: true })) this.n.feed({ ...m, isReplay: true });
+      // A turn that ended mid-question leaves it unanswered in the history, with nothing waiting on it.
+      for (const item of this.n.items) {
+        if ((item.kind === "question" || item.kind === "permission") && item.state === "pending") item.state = "withdrawn";
+      }
     } catch (e) {
       this.n.notice("error", `Couldn't load the earlier conversation: ${e}`);
     }
@@ -427,6 +431,12 @@ export class Session {
   answer(a: Answer) {
     const p = this.pending.get(a.item);
     const item = this.n.get(a.item);
+    if (!p && (item?.kind === "question" || item?.kind === "permission") && item.state === "pending") {
+      item.state = "withdrawn";
+      this.n.touch(item);
+      this.schedule();
+      return;
+    }
     if (!p || !item) return;
     this.pending.delete(a.item);
     if (item.kind === "question") {
