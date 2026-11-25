@@ -50,6 +50,8 @@ export type Item =
 
 export type ItemOf<K extends Item["kind"]> = Extract<Item, { kind: K }>;
 
+export type Task = { id: string; type: string; description: string };
+
 export type State = {
   busy: boolean;
   status: string | null;
@@ -72,6 +74,8 @@ export type State = {
   fast: boolean;
   /** Files written or edited anywhere in the chat, newest first; panes hold only part of it. */
   outputs: Output[];
+  /** Background shells and agents of the running process. */
+  tasks: Task[];
   /** The first message, a title until the session has one. */
   first: string | null;
 };

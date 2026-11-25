@@ -11,7 +11,7 @@ export function commandsOf(list: Msg[] | undefined) {
 }
 
 export function newState(): State {
-  return { busy: false, status: null, mode: "default", model: "", context: { used: 0, max: 0 }, queue: [], session: null, usage: null, commands: [], models: [], mcp: [], remote: null, title: null, effort: null, worktree: false, ultracode: false, fast: false, outputs: [], first: null };
+  return { busy: false, status: null, mode: "default", model: "", context: { used: 0, max: 0 }, queue: [], session: null, usage: null, commands: [], models: [], mcp: [], remote: null, title: null, effort: null, worktree: false, ultracode: false, fast: false, outputs: [], tasks: [], first: null };
 }
 
 function textOf(content: unknown): string {
@@ -105,6 +105,8 @@ export class Normalizer {
         return this.setState({ commands: commandsOf(msg.commands) });
       case "compact_boundary":
         return this.notice("info", "Compacted the conversation");
+      case "background_tasks_changed":
+        return this.setState({ tasks: (msg.tasks ?? []).map((t: Msg) => ({ id: t.task_id, type: t.task_type, description: t.description ?? "" })) });
       case "api_retry":
         return this.notice("warning", `API error, retrying (attempt ${msg.attempt ?? "?"})`);
     }

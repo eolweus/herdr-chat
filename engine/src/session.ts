@@ -327,7 +327,7 @@ export class Session {
         this.box.close();
         this.box = inbox();
         this.denyAll("Claude stopped");
-        this.n.setState({ busy: false, status: null, remote: null });
+        this.n.setState({ busy: false, status: null, remote: null, tasks: [] });
         this.schedule();
       }
     })();
