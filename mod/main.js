@@ -101,6 +101,12 @@ export default class HerdrChat extends View {
     this.handle = cx.focus_handle();
     this.input.focus();
     cx.timer.after(150, () => this.input.focus());
+    // Closing the pane it replaced takes the keyboard after the focus above.
+    if (p.reloaded) cx.timer.after(600, () => {
+      this.findPane();
+      if (this.pane) run("pane.focus", { pane: this.pane });
+      this.input.focus();
+    });
     cx.timer.after(400, () => this.findPane());
     if (checking()) return;
     // Herdr only sends "focus" for pane.go, not for clicks, tab switches or pane.focus.
@@ -126,6 +132,7 @@ export default class HerdrChat extends View {
         else if (c === "remote" && this.active()) this.setRemote(!this.state.remote, cx);
         else if (c === "compact" && this.active()) this.send({ type: "prompt", text: "/compact", images: [] });
         else if (c === "mcp" && this.active()) this.openMcp(null);
+        else if (c === "reload" && (this.findPane(), this.pane && focused()?.pane === this.pane)) this.reload();
         else if (c === "signin" && shared("herdr-chat:signin")?.key === this.key) this.signIn(shared("herdr-chat:signin").server);
         cx.notify();
       }
@@ -389,6 +396,15 @@ export default class HerdrChat extends View {
     else if (m.type === "upsert") { this.liveAt = Date.now(); await this.upsert(m.item, true); }
   }
 
+  // A saved mod file reloads panes in place but skips init and keeps the old snapshot; a fresh pane runs both.
+  reload() {
+    const pane = this.pane ?? panes().find((x) => x.mod === "herdr-chat" && x.focused)?.pane;
+    if (!pane) return notify({ title: "Couldn't reload this chat", body: "Its pane wasn't found", level: "error" });
+    const draft = this.input.value();
+    run("pane.split", { direction: "right", pane, mod: "herdr-chat", props: { ...props(), key: this.key, machine: this.machine, cwd: this.cwd, draft, reloaded: true } });
+    run("pane.close", { pane });
+  }
+
   setState(next) {
     const was = this.state.busy;
     if (next.remote !== this.state.remote) this.remotePending = false;
@@ -596,7 +612,7 @@ export default class HerdrChat extends View {
     const tok = this.slashToken();
     if (!tok || tok.start === this.dismissed) return [];
     const q = tok.q.toLowerCase();
-    const list = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp"), { name: "mcp", description: "Manage MCP servers", hint: "" }, { name: "restart-engine", description: "Restart a machine's chat engine, copying the code there first if it's remote (stops running turns)", hint: "[machine]" }, { name: "move", description: "Move this chat to another machine: the conversation continues there and this pane closes", hint: "<machine> [folder] [--force]" }];
+    const list = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp"), { name: "mcp", description: "Manage MCP servers", hint: "" }, { name: "restart-engine", description: "Restart a machine's chat engine, copying the code there first if it's remote (stops running turns)", hint: "[machine]" }, { name: "reload", description: "Reopen this chat in the same pane so it picks up new herdr-chat code", hint: "" }, { name: "move", description: "Move this chat to another machine: the conversation continues there and this pane closes", hint: "<machine> [folder] [--force]" }];
     const starts = list.filter((c) => c.name.toLowerCase().startsWith(q));
     const contains = list.filter((c) => !c.name.toLowerCase().startsWith(q) && (c.name + " " + c.description).toLowerCase().includes(q));
     return [...starts, ...contains].slice(0, 8);
@@ -631,6 +647,10 @@ export default class HerdrChat extends View {
         cx.notify();
       });
       return;
+    }
+    if (text === "/reload") {
+      this.input.set_value("");
+      return this.reload();
     }
     const restart = text.match(/^\/restart-engine(?:\s+(\S+))?$/);
     if (restart) {
