@@ -20,6 +20,8 @@ import { SidePanel } from "./side.js";
 import { bodyOf, splitQuotes, withQuotes } from "./quote.js";
 
 const DATA = "data/herdr-chat";
+const dbgLines = [];
+const dbg = (...a) => { dbgLines.push(`${new Date().toISOString()} ${a.map((x) => (typeof x === "string" ? x : JSON.stringify(x))).join(" ")}`); try { fs.writeFile(`${appHome()}/${DATA}/debug.log`, dbgLines.join("\n") + "\n").catch(() => {}); } catch {} };
 const VIEW_MS = 800;
 const IMAGE_EXT = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
 const imageRel = (id, i, type) => `${DATA}/img/${safe(id)}-${i}.${IMAGE_EXT[type] ?? "png"}`;
@@ -124,8 +126,8 @@ export default class HerdrChat extends View {
       if (this.links.pending.size) cx.spawn(async (cx) => { if (await this.links.check(this.cwd, this.machine)) cx.notify(); });
       const shown = this.visible();
       this.shownSince = shown ? this.shownSince ?? Date.now() : null;
-      // A neighbour closing (the editor, the pane a reload replaced) hands back the pane after our focus, so keep at it briefly.
-      if (shown && (!this.shown || this.handle.is_focused() || (Date.now() - this.shownSince < 1000 && !this.side.focused))) this.input.focus();
+      if (shown && !this.shown) this.claimUntil = Date.now() + 1000;
+      if (shown && (this.handle.is_focused() || (Date.now() < this.claimUntil && !this.side.focused))) this.input.focus();
       this.shown = shown;
       // The engine starts a stopped chat's CLI once it has been looked at for a moment, and keeps it while it is.
       const viewing = shown && Date.now() - this.shownSince >= VIEW_MS;
@@ -136,7 +138,8 @@ export default class HerdrChat extends View {
     cx.spawn(async (cx) => {
       for (;;) {
         const c = await nextCommand();
-        if (c === "focus" && (!this.pane || this.visible())) this.input.focus();
+        // Herdr says "focus" (popup closed, pane.go) and hands over the pane before the keyboard, so keep claiming it briefly.
+        if (c === "focus" && (!this.pane || this.visible())) { this.input.focus(); this.claimUntil = Date.now() + 1000; }
         else if (c === "edit" && this.pane && focused()?.pane === this.pane) this.editDraft(cx).catch((e) => { this.editor = null; notify({ title: "Couldn't open the editor", body: String(e?.message ?? e), level: "error" }); });
         else if (c === "remote" && this.active()) this.setRemote(!this.state.remote, cx);
         else if (c === "compact" && this.active()) this.send({ type: "prompt", text: "/compact", images: [] });
@@ -990,6 +993,7 @@ export default class HerdrChat extends View {
 
 
   addQuote(text, cx) {
+    dbg("addQuote before", this.quotes?.length, (text ?? "").slice(0, 30));
     this.ensure();
     if (!text?.trim()) return;
     this.quotes.push(text.trim());
@@ -999,6 +1003,7 @@ export default class HerdrChat extends View {
   }
 
   removeQuote(i, cx) {
+    dbg("removeQuote", i);
     this.quotes.splice(i, 1);
     cx.notify();
   }
@@ -1006,6 +1011,7 @@ export default class HerdrChat extends View {
   // A settled selection in a reply offers to quote it; a selection cleared elsewhere doesn't hide another's bar.
   // Pressing the bar clears the text's selection first, so the bar outlives it briefly, and for good once pressed.
   selected(key, sel, cx) {
+    dbg("selected", key, sel?.text?.slice(0, 30) ?? null, this.selection ? { key: this.selection.key, pressed: this.selection.pressed } : null);
     this.ensure();
     if (sel?.text && sel.position) this.selection = { key, text: sel.text, x: sel.position.x - this.origin.x, y: sel.position.y - this.origin.y };
     else if (this.selection?.key === key && !this.selection.pressed) {
@@ -1144,6 +1150,7 @@ export default class HerdrChat extends View {
   render() {
     if (this.other) return this.other.render();
     this.ensure();
+    if (this.quotes.length !== this.dbgQuotes) { this.dbgQuotes = this.quotes.length; dbg("render quotes", this.quotes.length); }
     this.takePick();
     const t = theme();
     const children = new Map();
