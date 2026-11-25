@@ -65,3 +65,15 @@ export async function beforeCompacts(id: string, later: { type: string; uuid?: s
   }
   return out.reverse();
 }
+
+// Claude Code notes each PR a session opens or links as a "pr-link" entry.
+export async function prLinks(id: string): Promise<string[]> {
+  const text = await transcript(id);
+  if (!text) return [];
+  const out = new Set<string>();
+  for (const line of text.split("\n")) {
+    if (!line.includes('"type":"pr-link"')) continue;
+    try { const url = JSON.parse(line).prUrl; if (url) out.add(url); } catch {}
+  }
+  return [...out];
+}

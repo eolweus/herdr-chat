@@ -3,7 +3,7 @@ import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { Image, Item, McpServer, McpTool, Output, State } from "./items";
 import { Normalizer, commandsOf } from "./normalizer";
-import { beforeCompacts, savedImages } from "./history";
+import { beforeCompacts, prLinks, savedImages } from "./history";
 import { describe } from "./tools";
 import { refreshLimits } from "./limits";
 import { prsOf, reposOf } from "./changes";
@@ -49,9 +49,9 @@ const PAGE_ITEMS = 80, PAGE_BYTES = 1_500_000;
 const EDITS = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
 const edited = (i: Item) => i.kind === "tool" && i.status === "ok" && Boolean(i.path) && EDITS.includes(i.name);
 
-const changesOf = (items: Item[]) => {
+const changesOf = (items: Item[], linked: string[]) => {
   const outputs = outputsOf(items);
-  return { outputs, repos: reposOf(outputs), prs: prsOf(items) };
+  return { outputs, repos: reposOf(outputs), prs: [...new Set([...linked, ...prsOf(items)])] };
 };
 const ghPr = (i: Item | undefined) => i?.kind === "tool" && i.name === "Bash" && /\bgh\s+pr\b/.test(i.detail ?? "");
 
@@ -140,7 +140,8 @@ export class Session {
     try {
       const later = await getSessionMessages(id, { dir: this.cwd, includeSystemMessages: true });
       for (const m of [...await beforeCompacts(id, later).catch(() => []), ...later]) this.n.feed({ ...m, isReplay: true });
-      this.n.setState({ ...changesOf(this.n.items), first: firstOf(this.n.items) });
+      this.n.setState({ ...changesOf(this.n.items, this.linked), first: firstOf(this.n.items) });
+      this.linkPrs();
       this.dropImages(this.n.items.map((i) => i.id));
       // Panes get these in the snapshot; sent as updates too, each would be drawn on its own.
       this.n.dirty.clear();
@@ -244,7 +245,7 @@ export class Session {
     const ids = [...this.n.dirty];
     this.n.dirty.clear();
     const changed = ids.map((id) => this.n.get(id));
-    if (changed.some((i) => i && (edited(i) || ghPr(i)))) this.n.setState(changesOf(this.n.items));
+    if (changed.some((i) => i && (edited(i) || ghPr(i)))) this.n.setState(changesOf(this.n.items, this.linked));
     if (!this.state.first && changed.some((i) => i?.kind === "user")) this.n.setState({ first: firstOf(this.n.items) });
     for (const id of ids) {
       const item = this.n.get(id);
@@ -340,6 +341,18 @@ export class Session {
     })();
   }
 
+  private linked: string[] = [];
+
+  private async linkPrs() {
+    const id = this.state.session;
+    if (!id) return;
+    const linked = await prLinks(id).catch(() => [] as string[]);
+    if (linked.join() === this.linked.join()) return;
+    this.linked = linked;
+    this.n.setState(changesOf(this.n.items, linked));
+    this.changed();
+  }
+
   protected receive(msg: Record<string, any>) {
     if (RECORD) {
       mkdirSync(RECORD, { recursive: true });
@@ -366,6 +379,7 @@ export class Session {
       this.mcp();
       this.title();
       setTimeout(() => this.title(), 8000);
+      this.linkPrs();
       const next = this.queued.shift();
       if (next) { this.send(next); this.changed(); }
     }
