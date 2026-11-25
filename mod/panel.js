@@ -184,7 +184,8 @@ export class Panel {
       .child(h_flex().id("memory-head").gap(6).items_center().cursor_pointer().on_click((_e, cx) => { setShared("herdr-chat:memory-open", !open); cx.notify(); })
         .child(svg(`mods/herdr-chat/icons/chevron-${open ? "down" : "right"}.svg`).size(13).flex_none().text_color(t.dim))
         .child(div().flex_1().text_size(12.5).font_semibold().text_color(t.foreground).child("Memory"))
-        .child(div().text_size(12).text_color(t.dim).child(m ? size(m.mb) : "Not running")))
+        .child(div().id("memory-total").text_size(12).text_color(t.dim).child(m ? `${m.approx ? "≈ " : ""}${size(m.mb)}` : "Not running")
+          .when(Boolean(m?.approx), (el) => el.tooltip("Counts memory that processes share in each of them, so it runs high"))))
       .when(open && !m, (el) => el.child(div().text_size(12).text_color(t.dim)
         .child("Claude stops after 5 idle minutes and starts again with your next message.")))
       .when(open && Boolean(m), (el) => el
