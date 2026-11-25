@@ -85,7 +85,8 @@ export type State = {
   memory: Memory | null;
 };
 
-export type Memory = { mb: number; parts: { name: string; mb: number; procs: number }[] };
+/** approx: RSS, which counts memory shared between processes in each of them. */
+export type Memory = { mb: number; parts: { name: string; mb: number; procs: number }[]; approx: boolean };
 
 export type Output = { path: string; name: string; created: boolean; add: number; del: number };
 export type RepoChange = { root: string; name: string; remote: string | null; add: number; del: number; files: number };

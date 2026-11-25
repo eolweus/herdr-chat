@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import type { Memory } from "./items";
 
 export type Proc = { pid: number; ppid: number; kb: number; args: string };
@@ -30,10 +31,26 @@ function nameOf(args: string, servers: Server[]) {
   return base(args.split(/\s+/)[0] ?? "");
 }
 
-// RSS counts shared pages in every process, so the total runs a little high.
-export function memoryOf(pid: number, procs: Proc[], servers: Server[]): Memory | null {
-  const self = procs.find((p) => p.pid === pid);
-  if (!self) return null;
+// Linux splits shared pages between the processes using them (PSS); elsewhere RSS counts them in each, so totals run high.
+const LINUX = process.platform === "linux";
+function pss(p: Proc) {
+  try {
+    const kb = /^Pss:\s+(\d+)/m.exec(readFileSync(`/proc/${p.pid}/smaps_rollup`, "utf8"))?.[1];
+    return kb ? { ...p, kb: Number(kb) } : p;
+  } catch {
+    return p;
+  }
+}
+
+export function memoryOf(pid: number, all: Proc[], servers: Server[]): Memory | null {
+  if (!all.some((p) => p.pid === pid)) return null;
+  const mine = new Set([pid]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const p of all) if (!mine.has(p.pid) && mine.has(p.ppid)) { mine.add(p.pid); grew = true; }
+  }
+  const procs = all.filter((p) => mine.has(p.pid)).map((p) => (LINUX ? pss(p) : p));
+  const self = procs.find((p) => p.pid === pid)!;
   const kids = new Map<number, Proc[]>();
   for (const p of procs) kids.set(p.ppid, [...(kids.get(p.ppid) ?? []), p]);
   const tree = (p: Proc): [number, number] => (kids.get(p.pid) ?? []).reduce<[number, number]>(([kb, n], c) => {
@@ -50,5 +67,5 @@ export function memoryOf(pid: number, procs: Proc[], servers: Server[]): Memory 
   add("Claude Code", self.kb, 1);
   for (const c of kids.get(pid) ?? []) add(nameOf(c.args, servers), ...tree(c));
   const list = [...parts.values()].map((p) => ({ ...p, mb: Math.round(p.mb) })).sort((a, b) => b.mb - a.mb);
-  return { mb: list.reduce((n, p) => n + p.mb, 0), parts: list };
+  return { mb: list.reduce((n, p) => n + p.mb, 0), parts: list, approx: !LINUX };
 }
