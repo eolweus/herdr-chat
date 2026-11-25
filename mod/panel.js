@@ -20,6 +20,9 @@ function checks(rollup) {
 
 const fmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1)}k` : String(n));
 
+const PARTS = ["ansi4", "ansi2", "ansi3", "ansi5", "ansi6", "ansi1"];
+const size = (mb) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`);
+
 const COLORS = { messages: "ansi4", mcp_tools: "ansi1", system_tools: "ansi2", skills: "ansi3", custom_agents: "ansi5", memory_files: "ansi6" };
 
 // Chats publish themselves to shared "herdr-chat:info:<pane>"; Claude Code terminals are read from
@@ -174,12 +177,31 @@ export class Panel {
       .child(div().id("mcp-manage").text_size(11.5).text_color(t.dim).cursor_pointer().hover((s) => s.text_color(t.foreground))
         .on_click(() => target("herdr-chat.mcp")).child("Manage all servers…")) : null;
 
+    const m = a.memory;
+    const open = shared("herdr-chat:memory-open") === true;
+    const part = (i) => t[PARTS[i % PARTS.length]] ?? t.dim;
+    const memory = a.terminal ? null : v_flex().w_full().gap(8).px(16).py(14).border_b_1().border_color(t.border)
+      .child(h_flex().id("memory-head").gap(6).items_center().cursor_pointer().on_click((_e, cx) => { setShared("herdr-chat:memory-open", !open); cx.notify(); })
+        .child(svg(`mods/herdr-chat/icons/chevron-${open ? "down" : "right"}.svg`).size(13).flex_none().text_color(t.dim))
+        .child(div().flex_1().text_size(12.5).font_semibold().text_color(t.foreground).child("Memory"))
+        .child(div().text_size(12).text_color(t.dim).child(m ? size(m.mb) : "Not running")))
+      .when(open && !m, (el) => el.child(div().text_size(12).text_color(t.dim)
+        .child("Claude stops after 5 idle minutes and starts again with your next message.")))
+      .when(open && Boolean(m), (el) => el
+        .child(h_flex().w_full().h(6).rounded(3).bg(t.raised).overflow_hidden()
+          .children(m.parts.map((p, i) => div().h_full().flex_basis(0).flex_grow(Math.max(p.mb, 1)).bg(part(i)))))
+        .children(m.parts.map((p, i) => h_flex().gap(8).items_center().text_size(12)
+          .child(div().size(8).rounded(2).bg(part(i)))
+          .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(p.name))
+          .when(p.procs > 1, (r) => r.child(div().text_color(t.dim).child(`${p.procs} processes`)))
+          .child(div().w(56).text_right().text_color(t.dim).child(size(p.mb))))));
+
     const todos = a.todos?.length ? section("Tasks").children(a.todos.map((td) => h_flex().gap(8).text_size(12.5)
       .child(div().w(16).text_color(td.status === "completed" ? t.done : td.status === "in_progress" ? t.working : t.dim)
         .child(td.status === "completed" ? "✓" : td.status === "in_progress" ? "◐" : "○"))
       .child(div().flex_1().text_color(td.status === "completed" ? t.dim : t.foreground).child(td.content)))) : null;
 
-    return root.child(env).when(Boolean(todos), (el) => el.child(todos)).child(ctx).child(outputs).when(Boolean(mcp), (el) => el.child(mcp))
+    return root.child(env).when(Boolean(todos), (el) => el.child(todos)).child(ctx).when(Boolean(memory), (el) => el.child(memory)).child(outputs).when(Boolean(mcp), (el) => el.child(mcp))
       .when(Boolean(changes), (el) => el.child(changes)).when(Boolean(tasks), (el) => el.child(tasks));
   }
 }
