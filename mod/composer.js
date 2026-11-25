@@ -28,21 +28,38 @@ function currentModel(s) {
   return ms.find((x) => x.value !== "default" && (x.value === s.model || x.resolved === id)) ?? ms.find((x) => x.value === "default") ?? null;
 }
 
+// Only the levels the model's provider offers; before a model is known, those of the agent's first model.
 export function efforts(s) {
-  const m = currentModel(s);
+  const m = currentModel(s) ?? ownModels(s).find((x) => x.efforts?.length);
   return m?.efforts?.length ? m.efforts : m ? [] : Object.keys(EFFORTS);
 }
 
 const primaryModels = (s) => ownModels(s).filter((m) => m.value !== "default" && !m.value.startsWith("claude-"));
 const moreModels = (s) => ownModels(s).filter((m) => m.value.startsWith("claude-"));
 
+// Like the Claude app's mode menu, in its order; {agent} becomes the chat's agent.
 export const MODES = [
-  ["default", "Ask before edits"],
-  ["acceptEdits", "Edit automatically"],
-  ["plan", "Plan mode"],
-  ["auto", "Auto mode"],
-  ["bypassPermissions", "Bypass permissions"],
+  ["auto", "Auto", "{agent} handles permission decisions"],
+  ["default", "Manual", "Always ask before making changes"],
+  ["acceptEdits", "Accept edits", "Automatically accept all file edits"],
+  ["plan", "Plan", "Create a plan before making changes"],
+  ["bypassPermissions", "Bypass permissions", "Accepts all permissions"],
 ];
+
+// The modes the chat's agent accepts, in the Claude app's order, with the agent's own descriptions when it gives them.
+export function availableModes(s) {
+  if (!s.modes) return MODES;
+  return MODES.flatMap(([value, name, about]) => {
+    const m = s.modes.find((x) => x.value === value);
+    return m ? [[value, name, m.description || about]] : [];
+  });
+}
+
+// What the model chip shows: the menu lists aliases like "default" that resolve to a named model.
+export function modelLabel(s) {
+  const cur = currentModel(s);
+  return cur?.value === "default" ? primaryModels(s).find((m) => m.resolved === cur.resolved)?.name ?? cur.name : cur?.name ?? s.model ?? "";
+}
 
 export const machineColor = (m) => (shared("machine.colors") ?? {})[m ?? "local"] ?? null;
 
@@ -97,8 +114,7 @@ export function composer(view, t) {
           .on_click((_e, cx) => (stop ? view.interrupt(cx) : view.submit(cx)))
           .child(stop ? "■" : "↑"))))
     .child(h_flex().px(4).gap(4).items_center()
-      .child(chip("mode", t).tooltip("Shift-Tab to change").on_click((_e, cx) => view.cycleMode(cx))
-        .child(div().text_color(s.mode === "bypassPermissions" ? t.blocked : s.mode === "plan" ? t.accent : t.muted).child(mode)))
+      .child(modeMenu(view, t, mode))
       .when(Boolean(s.model) || s.models?.length > 0, (el) => el.child(modelMenu(view, t)))
       .when(view.canWorktree(), (el) => el.child(chip("worktree", t).tooltip("Start this chat in a new git worktree")
         .on_click((_e, cx) => view.toggleWorktree(cx))
@@ -139,13 +155,37 @@ const row = (id, t) => h_flex().id(id).gap(10).px(10).py(6).rounded(8).items_cen
 const check = (t) => div().flex_none().text_color(t.accent).child("✓");
 
 // Like the desktop app's model menu: models up front, effort and older models in panels beside it.
+function modeMenu(view, t, label) {
+  const s = view.state;
+  const trigger = chip("mode", t).when(view.modeMenu, (el) => el.bg(t.hover)).tooltip("Mode · Shift-Tab to cycle")
+    .child(div().text_color(s.mode === "bypassPermissions" ? t.blocked : s.mode === "plan" ? t.accent : t.muted).child(label));
+  const list = card(t).w(300)
+    .child(div().px(10).pt(4).pb(4).text_size(12).text_color(t.dim).child("Mode"))
+    .children(availableModes(s).map(([value, name, about], i) => h_flex().id(`mode-${value}`).gap(10).px(10).py(6).rounded(8).items_center().cursor_pointer()
+      .hover((st) => st.bg(t.hover)).on_click((_e, cx) => view.pickMode(value, cx))
+      .child(v_flex().flex_1().min_w(0).gap(1)
+        .child(div().text_size(13.5).text_color(value === "bypassPermissions" ? t.blocked : t.foreground).child(name))
+        .child(div().text_size(12).text_color(t.dim).child(about.replace("{agent}", view.agent()))))
+      .when(s.mode === value, (el) => el.child(check(t)))
+      .child(div().flex_none().w(12).text_size(12).text_color(t.dim).child(String(i + 1)))));
+  return Popover.new("mode-menu").anchor("bottom_left").open(Boolean(view.modeMenu))
+    .on_open_change((open, cx) => { view.modeMenu = open; cx.notify(); })
+    .trigger(trigger)
+    .content(div().mb(6)
+      .on_key_down((e, cx) => {
+        const m = availableModes(s)[Number(e.keystroke) - 1];
+        if (m) { view.pickMode(m[0], cx); cx.stop_propagation(); }
+      })
+      .child(list));
+}
+
 function modelMenu(view, t) {
   const s = view.state;
   const cur = currentModel(s);
   const effort = s.effort && efforts(s).includes(s.effort) ? s.effort : null;
   const trigger = chip("model", t).when(view.modelMenu, (el) => el.bg(t.hover))
     .child(agentIcon(s.backend, 12, t.muted))
-    .child(div().text_color(t.foreground).child(cur?.value === "default" ? primaryModels(s).find((m) => m.resolved === cur.resolved)?.name ?? cur.name : cur?.name ?? (s.model || "Model")))
+    .child(div().text_color(t.foreground).child(modelLabel(s) || "Model"))
     .when(Boolean(effort), (el) => el.child(div().text_color(t.dim).child(EFFORTS[effort])));
   const sub = (name) => (hovered, cx) => { if (hovered && view.modelSub !== name) { view.modelSub = name; cx.notify(); } };
   const pick = (m, i, list) => row(`model-${m.value}`, t).on_hover(sub(null)).on_click((_e, cx) => view.pickModel(m.value, cx))

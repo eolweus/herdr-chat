@@ -14,7 +14,7 @@ import { composer, RUN_TAG, isRunOutput } from "./composer.js";
 import { handoffCard, handoffStrip, isHandoffPost } from "./handoff.js";
 import { moveChat } from "./move.js";
 import { McpDialog } from "./mcp.js";
-import { AGENTS } from "./composer.js";
+import { AGENTS, availableModes, modelLabel } from "./composer.js";
 import { PROTOCOL, endpoint, openAuth } from "./engine.js";
 import { FileLinks, openFile } from "./filelinks.js";
 import { SidePanel } from "./side.js";
@@ -93,21 +93,11 @@ export default class HerdrChat extends View {
     this.stick = true;
     this.pane = null;
     this.scroll = ScrollHandle.new();
-    this.input = TextareaState.new({ placeholder: `Ask ${p.backend === "agy" ? "Antigravity" : "Claude"}…` });
-    this.input.set_auto_grow(1, 12);
+    this.makeInput(`Ask ${p.backend === "agy" ? "Antigravity" : "Claude"}…`);
     if (p.draft) this.setDraft(p.draft);
     this.pickId = null;
     this.resumeId = p.resume ?? null;
-    this.input.on("submit", (e, cx) => this.enter(e, cx));
-    this.input.on("paste_other", (_e, cx) => cx.spawn(async (cx) => this.pasteImage(cx)));
-    this.input.on("change", (_e, cx) => {
-      this.commandAt = 0;
-      if (this.slashToken()?.start !== this.dismissed) this.dismissed = null;
-      cx.notify();
-    });
     this.commandAt = 0;
-    this.input.on("focus", (_e, cx) => { this.focusedInput = true; this.findPane(); cx.notify(); });
-    this.input.on("blur", (_e, cx) => { this.focusedInput = false; cx.notify(); });
     this.handle = cx.focus_handle();
     this.input.focus();
     cx.timer.after(150, () => this.input.focus());
@@ -153,6 +143,35 @@ export default class HerdrChat extends View {
 
   active() {
     return shared("herdr-chat:target") === this.key;
+  }
+
+  // A textarea's placeholder is fixed when it's made, so naming the current model means making a new one.
+  makeInput(placeholder) {
+    const old = this.input;
+    this.placeholder = placeholder;
+    this.input = TextareaState.new({ placeholder });
+    this.input.set_auto_grow(1, 12);
+    this.input.on("submit", (e, cx) => this.enter(e, cx));
+    this.input.on("paste_other", (_e, cx) => cx.spawn(async (cx) => this.pasteImage(cx)));
+    this.input.on("change", (_e, cx) => {
+      this.commandAt = 0;
+      if (this.slashToken()?.start !== this.dismissed) this.dismissed = null;
+      this.renameInput();
+      cx.notify();
+    });
+    this.input.on("focus", (_e, cx) => { this.focusedInput = true; this.findPane(); cx.notify(); });
+    this.input.on("blur", (_e, cx) => { this.focusedInput = false; cx.notify(); });
+    if (old) {
+      if (this.focusedInput) this.input.focus();
+      old.release();
+    }
+  }
+
+  // Only while the box is empty, where the placeholder shows; a draft keeps its box until it's cleared.
+  renameInput() {
+    const name = modelLabel(this.state) || this.agent();
+    const placeholder = `Ask ${name}…`;
+    if (placeholder !== this.placeholder && !this.input.value()) this.makeInput(placeholder);
   }
 
   agent() {
@@ -439,6 +458,7 @@ export default class HerdrChat extends View {
     const was = this.state.busy;
     if (next.remote !== this.state.remote) this.remotePending = false;
     this.state = next;
+    this.renameInput();
     if (was && !next.busy && !this.visible()) this.unseen = true;
     this.publish();
     this.publishPane();
@@ -925,9 +945,15 @@ export default class HerdrChat extends View {
   }
 
   cycleMode(cx) {
-    const next = CYCLE[(CYCLE.indexOf(this.state.mode) + 1) % CYCLE.length];
-    this.send({ type: "set", mode: next });
-    this.state = { ...this.state, mode: next };
+    const cycle = CYCLE.filter((m) => availableModes(this.state).some(([v]) => v === m));
+    this.pickMode(cycle[(cycle.indexOf(this.state.mode) + 1) % cycle.length], cx);
+  }
+
+  pickMode(mode, cx) {
+    if (!mode) return;
+    this.send({ type: "set", mode });
+    this.state = { ...this.state, mode };
+    this.modeMenu = false;
     cx.notify();
   }
 
@@ -1105,6 +1131,7 @@ export default class HerdrChat extends View {
     else if (cmds.length && e.keystroke === "tab") this.complete(cmds[this.commandAt] ?? cmds[0], cx);
     else if (cmds.length && e.keystroke === "escape") { this.dismissed = this.slashToken()?.start ?? null; cx.notify(); }
     else if (this.modelMenu && e.keystroke === "escape") { this.modelMenu = false; cx.notify(); }
+    else if (this.modeMenu && e.keystroke === "escape") { this.modeMenu = false; cx.notify(); }
     else if (e.keystroke === "cmd-;") this.side.toggle(cx);
     else if (e.keystroke === "escape" && this.selection) this.dismissSelection(cx);
     else if (e.keystroke === "escape" && this.side.focused) { if (this.side.busy) this.side.interrupt(cx); else this.side.close(cx); }
