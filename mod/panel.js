@@ -3,7 +3,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { agents, exec, focused, home, panes, run, setShared, shared, theme } from "herdr";
 import { openFile } from "./filelinks.js";
 import { TerminalSession } from "./terminal.js";
-import { machineColor } from "./composer.js";
+import { agentIcon, machineColor } from "./composer.js";
 
 const DOCS = /\.(md|markdown|html?|pdf)$/i;
 
@@ -121,12 +121,17 @@ export class Panel {
       .when(Boolean(a.branch), (el) => el.child(row("git-branch", a.branch)))
       .when(Boolean(a.terminal && a.remote), (el) => el.child(row("smartphone", "Remote Control on", link("remote-link", "Open", () => exec("open", [a.remote])))))
       .when(!a.terminal, (el) => el.child(h_flex().id("remote-row").cursor_pointer().on_click(() => target("herdr-chat.remote"))
-        .tooltip(a.remote ? "Open on claude.ai/code and in the Claude app on your phone" : "Continue this chat from claude.ai/code or your phone")
+        .tooltip(a.backend === "agy"
+          ? "Antigravity's remote control is per machine: every Antigravity chat here shows up at antigravity.google.com"
+          : a.remote ? "Open on claude.ai/code and in the Claude app on your phone" : "Continue this chat from claude.ai/code or your phone")
         .child(row("smartphone", a.remotePending ? "Connecting…" : "Remote Control", toggle("remote-toggle", Boolean(a.remote), a.remotePending)).flex_1())))
       .when(!a.terminal && Boolean(a.remote), (el) => el.child(h_flex().gap(10).pl(25).text_size(11.5)
         .child(link("remote-open", "Open in browser", () => exec("open", [a.remote])))
         .child(link("remote-copy", "Copy link", (_e, cx) => cx.write_to_clipboard(a.remote)))))
-      .when(Boolean(a.model), (el) => el.child(row("file-text", a.model, div().text_size(11.5).text_color(t.dim).child(a.mode ?? "")))));
+      .when(Boolean(a.model), (el) => el.child(h_flex().gap(10).items_center().min_w(0).text_size(12.5)
+        .child(agentIcon(a.backend, 15, t.dim))
+        .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(a.model))
+        .child(div().text_size(11.5).text_color(t.dim).child(a.mode ?? "")))));
 
     const u = a.usage;
     const used = u ? u.categories.filter((c) => c.kind === "used") : [];

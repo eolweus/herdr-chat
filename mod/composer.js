@@ -12,8 +12,18 @@ const EFFORTS = { low: "Low", medium: "Medium", high: "High", xhigh: "Extra", ma
 const EFFORT_NOTE = { medium: ["Recommended", null], max: ["⚠ 3.5× or more usage", "warn"] };
 
 // The session reports a full model id; the menu lists aliases like "opus" that resolve to one.
+const agentOf = (m) => m.backend ?? "claude";
+const ownModels = (s) => (s.models ?? []).filter((m) => agentOf(m) === (s.backend ?? "claude"));
+const otherModels = (s) => (s.models ?? []).filter((m) => agentOf(m) !== (s.backend ?? "claude") && m.value !== "default" && !m.value.startsWith("claude-"));
+export const AGENTS = { claude: "Claude", agy: "Antigravity" };
+
+// Antigravity's logo has its own colours; Claude's is a one-colour glyph.
+export const agentIcon = (backend, size, color) => backend === "agy"
+  ? image("icons/antigravity.svg").size(size).flex_none()
+  : svg("icons/claude.svg").size(size).flex_none().text_color(color);
+
 function currentModel(s) {
-  const ms = s.models ?? [];
+  const ms = ownModels(s);
   const id = ms.find((x) => x.value === s.model)?.resolved ?? s.model;
   return ms.find((x) => x.value !== "default" && (x.value === s.model || x.resolved === id)) ?? ms.find((x) => x.value === "default") ?? null;
 }
@@ -23,8 +33,8 @@ export function efforts(s) {
   return m?.efforts?.length ? m.efforts : m ? [] : Object.keys(EFFORTS);
 }
 
-const primaryModels = (s) => (s.models ?? []).filter((m) => m.value !== "default" && !m.value.startsWith("claude-"));
-const moreModels = (s) => (s.models ?? []).filter((m) => m.value.startsWith("claude-"));
+const primaryModels = (s) => ownModels(s).filter((m) => m.value !== "default" && !m.value.startsWith("claude-"));
+const moreModels = (s) => ownModels(s).filter((m) => m.value.startsWith("claude-"));
 
 export const MODES = [
   ["default", "Ask before edits"],
@@ -134,6 +144,7 @@ function modelMenu(view, t) {
   const cur = currentModel(s);
   const effort = s.effort && efforts(s).includes(s.effort) ? s.effort : null;
   const trigger = chip("model", t).when(view.modelMenu, (el) => el.bg(t.hover))
+    .child(agentIcon(s.backend, 12, t.muted))
     .child(div().text_color(t.foreground).child(cur?.value === "default" ? primaryModels(s).find((m) => m.resolved === cur.resolved)?.name ?? cur.name : cur?.name ?? (s.model || "Model")))
     .when(Boolean(effort), (el) => el.child(div().text_color(t.dim).child(EFFORTS[effort])));
   const sub = (name) => (hovered, cx) => { if (hovered && view.modelSub !== name) { view.modelSub = name; cx.notify(); } };
@@ -146,6 +157,16 @@ function modelMenu(view, t) {
       .on_click((_e, cx) => { view.modelSub = "effort"; cx.notify(); })
       .child(div().flex_1().child("Effort"))
       .child(div().text_color(t.dim).child(effort ? EFFORTS[effort] : "Default")).child(div().text_color(t.dim).child("›"))))
+    .when(otherModels(s).length > 0, (el) => {
+      const other = agentOf(otherModels(s)[0]);
+      const locked = view.started();
+      return el.child(rule(t))
+        .child(h_flex().px(10).pt(2).pb(2).gap(6).items_center().text_size(12).text_color(t.dim)
+          .child(agentIcon(other, 11, t.dim)).child(div().child(locked ? `${AGENTS[other]} · new chats only` : AGENTS[other])))
+        .children(otherModels(s).map((m) => locked
+          ? h_flex().id(`model-${other}-${m.value}`).px(10).py(6).text_size(13).text_color(t.dim).tooltip(`Start a new chat to use ${AGENTS[other]}`).child(m.name)
+          : row(`model-${other}-${m.value}`, t).on_hover(sub(null)).on_click((_e, cx) => view.pickModel(m.value, cx, other)).child(div().flex_1().child(m.name))));
+    })
     .when(moreModels(s).length > 0, (el) => el.child(rule(t)).child(row("more", t).on_hover(sub("more")).bg(view.modelSub === "more" ? t.hover : t.surface)
       .on_click((_e, cx) => { view.modelSub = "more"; cx.notify(); })
       .child(div().flex_1().child("More models")).child(div().text_color(t.dim).child("›"))))

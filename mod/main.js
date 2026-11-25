@@ -14,6 +14,7 @@ import { composer, RUN_TAG, isRunOutput } from "./composer.js";
 import { handoffCard, handoffStrip, isHandoffPost } from "./handoff.js";
 import { moveChat } from "./move.js";
 import { McpDialog } from "./mcp.js";
+import { AGENTS } from "./composer.js";
 import { PROTOCOL, endpoint, openAuth } from "./engine.js";
 import { FileLinks, openFile } from "./filelinks.js";
 import { SidePanel } from "./side.js";
@@ -140,7 +141,7 @@ export default class HerdrChat extends View {
         // Herdr says "focus" (popup closed, pane.go) and hands over the pane before the keyboard, so keep claiming it briefly.
         if (c === "focus" && (!this.pane || this.visible())) { this.input.focus(); this.claimUntil = Date.now() + 1000; }
         else if (c === "edit" && this.pane && focused()?.pane === this.pane) this.editDraft(cx).catch((e) => { this.editor = null; notify({ title: "Couldn't open the editor", body: String(e?.message ?? e), level: "error" }); });
-        else if (c === "remote" && this.active() && this.claudeOnly()) this.setRemote(!this.state.remote, cx);
+        else if (c === "remote" && this.active()) this.setRemote(!this.state.remote, cx);
         else if (c === "compact" && this.active()) this.send({ type: "prompt", text: "/compact", images: [] });
         else if (c === "mcp" && this.active() && this.claudeOnly()) this.openMcp(null);
         else if (c === "reload" && (this.findPane(), this.pane && focused()?.pane === this.pane)) this.reload();
@@ -155,10 +156,15 @@ export default class HerdrChat extends View {
   }
 
   agent() {
-    return this.state.backend === "agy" ? "Antigravity" : "Claude";
+    return AGENTS[this.state.backend ?? "claude"] ?? "Claude";
   }
 
-  // Antigravity chats run over ACP, which has no remote control, MCP management, rewind, fork or side chat.
+  // The agent can only change before the first message.
+  started() {
+    return Boolean(this.state.session) || this.items.length > 0;
+  }
+
+  // Antigravity chats run over ACP, which has no MCP management, rewind, fork or side chat.
   claudeOnly() {
     return this.state.backend !== "agy";
   }
@@ -184,7 +190,7 @@ export default class HerdrChat extends View {
     if (!this.key || !this.pane) return;
     const s = this.state;
     const data = {
-      key: this.key, pane: this.pane, machine: this.machine, session: this.state.session ?? null, folder: tilde(this.cwd, this.home), branch: this.branch ?? null,
+      key: this.key, pane: this.pane, machine: this.machine, backend: s.backend ?? "claude", session: this.state.session ?? null, folder: tilde(this.cwd, this.home), branch: this.branch ?? null,
       model: s.model, mode: s.mode, usage: s.usage ?? null, context: s.context, outputs: this.outputs(), mcp: s.mcp ?? [], remote: s.remote ?? null, remotePending: this.remotePending, tasks: s.tasks ?? [], prs: s.prs ?? [], repos: s.repos ?? [], memory: s.memory ?? null, title: s.title ?? null,
     };
     const json = JSON.stringify(data);
@@ -290,7 +296,7 @@ export default class HerdrChat extends View {
     const first = firstText && bodyOf(firstText).split("\n")[0];
     const title = this.handoff?.title ?? this.state.title ?? (first && first.slice(0, 80));
     this.nameTab(this.handoff?.title ?? this.state.title ?? first, first);
-    const json = JSON.stringify({ folder: tilde(this.cwd, this.home), cwd: this.cwd, status, title, named: Boolean(this.state.title) });
+    const json = JSON.stringify({ folder: tilde(this.cwd, this.home), cwd: this.cwd, status, title, named: Boolean(this.state.title), backend: this.state.backend ?? "claude" });
     if (json === this.paneShared && shared(`herdr-chat:pane:${this.pane}`)) return;
     this.paneShared = json;
     setShared(`herdr-chat:pane:${this.pane}`, JSON.parse(json));
@@ -636,7 +642,7 @@ export default class HerdrChat extends View {
     const tok = this.slashToken();
     if (!tok || tok.start === this.dismissed) return [];
     const q = tok.q.toLowerCase();
-    const all = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp" && c.name !== "btw"), { name: "btw", description: "Ask on the side, in a read-only copy of this chat that doesn't interrupt it or end up in it (Cmd-;)", hint: "[question]" }, { name: "mcp", description: "Manage MCP servers", hint: "" }, { name: "restart-engine", description: "Restart a machine's chat engine, copying the code there first if it's remote (stops running turns)", hint: "[machine]" }, { name: "reload", description: "Reopen this chat in the same pane so it picks up new herdr-chat code", hint: "" }, { name: "move", description: "Move this chat to another machine: the conversation continues there and this pane closes", hint: "<machine> [folder] [--force]" }];
+    const all = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp" && c.name !== "btw" && c.name !== "model"), { name: "model", description: "Switch model, or agent (Claude or Antigravity) before the first message", hint: "[model]" }, { name: "btw", description: "Ask on the side, in a read-only copy of this chat that doesn't interrupt it or end up in it (Cmd-;)", hint: "[question]" }, { name: "mcp", description: "Manage MCP servers", hint: "" }, { name: "restart-engine", description: "Restart a machine's chat engine, copying the code there first if it's remote (stops running turns)", hint: "[machine]" }, { name: "reload", description: "Reopen this chat in the same pane so it picks up new herdr-chat code", hint: "" }, { name: "move", description: "Move this chat to another machine: the conversation continues there and this pane closes", hint: "<machine> [folder] [--force]" }];
     const ours = ["btw", "mcp", "move"];
     const list = this.claudeOnly() ? all : all.filter((c) => !ours.includes(c.name) || (this.state.commands ?? []).some((x) => x.name === c.name));
     const starts = list.filter((c) => c.name.toLowerCase().startsWith(q));
@@ -663,6 +669,17 @@ export default class HerdrChat extends View {
     const text = this.input.value().trim();
     if (!this.claudeOnly() && /^\/(mcp|move|btw)\b/.test(text) && !(this.state.commands ?? []).some((c) => text.startsWith(`/${c.name}`))) {
       return notify({ title: `${text.split(/\s/)[0]} isn't available in Antigravity chats`, level: "warning" });
+    }
+    const model = text.match(/^\/model(?:\s+(.+))?$/);
+    if (model) {
+      this.input.set_value("");
+      const q = model[1]?.trim().toLowerCase();
+      if (!q) { this.modelMenu = true; return cx.notify(); }
+      const m = (this.state.models ?? []).find((x) => x.value.toLowerCase() === q || x.name.toLowerCase() === q)
+        ?? (this.state.models ?? []).find((x) => x.value.toLowerCase().startsWith(q) || x.name.toLowerCase().startsWith(q));
+      if (!m) return notify({ title: `No model called ${model[1].trim()}`, level: "warning" });
+      if ((m.backend ?? "claude") !== (this.state.backend ?? "claude") && this.started()) return notify({ title: `Start a new chat to use ${AGENTS[m.backend ?? "claude"]}`, level: "warning" });
+      return this.pickModel(m.value, cx, m.backend);
     }
     if (text === "/mcp") {
       this.input.set_value("");
@@ -877,8 +894,8 @@ export default class HerdrChat extends View {
     cx.notify();
   }
 
-  pickModel(value, cx) {
-    this.send({ type: "set", model: value });
+  pickModel(value, cx, backend) {
+    this.send({ type: "set", model: value, ...(backend && backend !== (this.state.backend ?? "claude") ? { backend } : {}) });
     this.modelMenu = false;
     cx.notify();
   }
