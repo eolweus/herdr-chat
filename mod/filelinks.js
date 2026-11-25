@@ -1,4 +1,5 @@
 import { appHome, exec, home, panes, run } from "herdr";
+import { openHtml } from "./html.js";
 
 // herdr-mods' files-work also previews images and PDFs and opens nvim; use it when it's installed.
 let filesWork = null;
@@ -6,6 +7,10 @@ let filesWork = null;
 // Opens beside `beside`, replacing a file viewer already in that tab so clicks don't pile up panes.
 export function openFile(cx, path, machine, opts) {
   cx.spawn(async () => {
+    if (/\.html?$/i.test(path)) {
+      const beside = opts?.beside ?? null;
+      return openHtml(path, machine, beside, beside && panes().find((x) => x.pane === beside)?.tab);
+    }
     filesWork ??= (await exec("test", ["-e", `${appHome()}/mods/files-work/mod.json`]).catch(() => null))?.code === 0;
     split(path, machine, opts);
   });
