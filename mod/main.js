@@ -57,7 +57,7 @@ export default class HerdrChat extends View {
     if (p.mcp) return void (this.other = new McpDialog(p.mcp, cx));
     this.key = p.key ?? null;
     // The input's own up/down bindings sit deeper than this view, so the list's keys are bound inside it too.
-    cx.bind_keys([["tab", "herdr-chat-complete"], ["up", "herdr-chat-up"], ["down", "herdr-chat-down"], ["ctrl-k", "herdr-chat-up"], ["ctrl-j", "herdr-chat-down"]]
+    cx.bind_keys([["tab", "herdr-chat-complete"], ["enter", "herdr-chat-complete"], ["up", "herdr-chat-up"], ["down", "herdr-chat-down"], ["ctrl-k", "herdr-chat-up"], ["ctrl-j", "herdr-chat-down"]]
       .flatMap(([keystroke, action]) => ["HerdrChatCommands", "HerdrChatCommands > Input"].map((context) => ({ keystroke, action, context }))));
     this.machine = p.machine || null;
     this.cwd = p.cwd ?? focused()?.cwd ?? null;
