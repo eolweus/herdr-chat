@@ -76,6 +76,7 @@ async function reopen(d: Data, s: Session, session: string | null, cwd: string) 
   const next = open(s.key, cwd, s.backend);
   d.session = next;
   for (const c of s.clients) if (c !== d.client) next.clients.add(c);
+  s.clients.clear();
   await next.load();
   next.attach(d.client);
   for (const c of next.clients) if (c !== d.client) next.sendSnapshot(c);
