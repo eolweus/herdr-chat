@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import type { ServerWebSocket } from "bun";
 import { Session, userSettings, type Client, type Handoff } from "./src/session";
 import { ReplaySession } from "./src/replay";
+import { AcpSession } from "./src/acp-session";
 import { refreshLimits } from "./src/limits";
 import { projectServers } from "./src/projects";
 import { processes } from "./src/memory";
@@ -38,7 +39,7 @@ function token(): string {
 
 const TOKEN = Buffer.from(token());
 
-type Pane = { session: string | null; cwd: string; remote?: boolean; handoff?: Handoff; closed?: string; preamble?: string; title?: string };
+type Pane = { session: string | null; cwd: string; backend?: string; remote?: boolean; handoff?: Handoff; closed?: string; preamble?: string; title?: string };
 const panes: Record<string, Pane> = existsSync(PANES_FILE) ? JSON.parse(readFileSync(PANES_FILE, "utf8")) : {};
 function savePanes() {
   mkdirSync(dirname(PANES_FILE), { recursive: true });
@@ -49,15 +50,15 @@ const sessions = new Map<string, Session>();
 
 function remember(s: Session) {
   const was = panes[s.key];
-  panes[s.key] = { session: s.state.session, cwd: s.cwd, remote: s.wantRemote, handoff: s.handoff ?? undefined, closed: was?.closed, preamble: s.preamble ?? undefined, title: s.state.title ?? undefined };
+  panes[s.key] = { session: s.state.session, cwd: s.cwd, backend: s.backend === "claude" ? undefined : s.backend, remote: s.wantRemote, handoff: s.handoff ?? undefined, closed: was?.closed, preamble: s.preamble ?? undefined, title: s.state.title ?? undefined };
   if (replay < 0) savePanes();
 }
 
-function open(key: string, cwd: string): Session {
+function open(key: string, cwd: string, backend?: string): Session {
   const live = sessions.get(key);
   if (live) return live;
   const known = replay < 0 ? panes[key] : undefined;
-  const Kind = replay >= 0 ? ReplaySession : Session;
+  const Kind = replay >= 0 ? ReplaySession : (known?.backend ?? backend) === "agy" ? AcpSession : Session;
   const s = new Kind(key, known?.cwd ?? cwd, known?.session ?? null, remember);
   s.handoff = known?.handoff ?? null;
   s.preamble = known?.preamble ?? null;
@@ -70,9 +71,9 @@ function open(key: string, cwd: string): Session {
 async function reopen(d: Data, s: Session, session: string | null, cwd: string) {
   s.close();
   sessions.delete(s.key);
-  panes[s.key] = { ...panes[s.key], session, cwd, remote: s.wantRemote, title: undefined };
+  panes[s.key] = { ...panes[s.key], session, cwd, backend: s.backend === "claude" ? undefined : s.backend, remote: s.wantRemote, title: undefined };
   if (replay < 0) savePanes();
-  const next = open(s.key, cwd);
+  const next = open(s.key, cwd, s.backend);
   d.session = next;
   for (const c of s.clients) if (c !== d.client) next.clients.add(c);
   await next.load();
@@ -100,7 +101,7 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
   if (!d.authed) return ws.close(4001, "unauthorized");
   if (m.type === "open") {
     d.session?.detach(d.client);
-    const s = open(String(m.key || crypto.randomUUID()), String(m.cwd || HOME));
+    const s = open(String(m.key || crypto.randomUUID()), String(m.cwd || HOME), m.backend ? String(m.backend) : undefined);
     d.session = s;
     console.log(`open ${s.key}`);
     await s.load();
@@ -222,7 +223,7 @@ async function api(req: Request, path: string): Promise<Response> {
   if (path === "/api/handoff") {
     const cwd = String(b.cwd || HOME);
     if (!existsSync(cwd)) return json({ error: `${cwd} doesn't exist on this machine` }, 400);
-    const s = open(key, cwd);
+    const s = open(key, cwd, b.backend ? String(b.backend) : undefined);
     await s.load();
     const kind = ["orchestrated", "standalone"].includes(b.kind) ? b.kind : "once";
     s.handoff = { id: String(b.id), title: b.title ? String(b.title) : null, from: String(b.from ?? ""), kind, result: null, report: null };
