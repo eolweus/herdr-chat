@@ -56,6 +56,7 @@ export class AcpSession extends Session {
     if (!this.sid) return;
     try {
       await this.ensure();
+      this.recount();
     } catch (e: any) {
       this.n.notice("error", `Couldn't load the earlier conversation: ${e?.message ?? e}`);
     }

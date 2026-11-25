@@ -440,6 +440,11 @@ export class Session {
 
   private linked: string[] = [];
 
+  // Outputs, repos and PRs come from the rows; a history loaded in one go needs them worked out once.
+  protected recount() {
+    this.n.setState({ ...changesOf(this.n.items, this.linked), first: firstOf(this.n.items) });
+  }
+
   private async linkPrs() {
     const id = this.state.session;
     if (!id) return;

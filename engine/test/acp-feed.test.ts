@@ -2,6 +2,7 @@ import { describe as group, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Normalizer } from "../src/normalizer";
 import { AcpFeed } from "../src/acp-feed";
+import { prsOf } from "../src/changes";
 
 function play(file: string) {
   const rows = readFileSync(`${import.meta.dir}/fixtures/${file}`, "utf8").trim().split("\n").map((l) => JSON.parse(l));
@@ -81,4 +82,13 @@ test("questions stay hidden; agy writes them out as text", () => {
   const n = play("acp-agy-question.jsonl");
   expect(n.items.some((i) => i.kind === "tool")).toBe(false);
   expect(n.items.some((i) => i.kind === "text" && i.text.includes("Which colour"))).toBe(true);
+});
+
+test("a PR agy makes with gh is found like Claude's", () => {
+  const n = new Normalizer("/repo");
+  const feed = new AcpFeed(n, "t");
+  const call = { toolCallId: "c1", name: "run_command", kind: "execute", args: { CommandLine: "gh pr create -R acme/app --fill" } };
+  feed.feed({ sessionUpdate: "tool_call", ...call, status: "in_progress" });
+  feed.feed({ sessionUpdate: "tool_call_update", ...call, status: "completed", rawOutput: { output: "Command output:\nhttps://github.com/acme/app/pull/42\r\n", exit_code: 0 } });
+  expect(prsOf(n.items)).toEqual(["https://github.com/acme/app/pull/42"]);
 });
