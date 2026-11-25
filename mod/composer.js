@@ -1,4 +1,4 @@
-import { div, image } from "gpui-kit";
+import { div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, Textarea, Popover } from "gpui-base";
 import { shared } from "herdr";
 
@@ -89,7 +89,9 @@ export function composer(view, t) {
       .when(Boolean(s.model) || s.models?.length > 0, (el) => el.child(modelMenu(view, t)))
       .when(view.canWorktree(), (el) => el.child(chip("worktree", t).tooltip("Start this chat in a new git worktree")
         .on_click((_e, cx) => view.toggleWorktree(cx))
-        .child(div().text_color(s.worktree ? t.foreground : t.dim).child(s.worktree ? "☑" : "☐"))
+        .child(div().size(13).rounded(4).flex().items_center().justify_center().border_1()
+          .border_color(s.worktree ? t.accent : t.dim).bg(s.worktree ? t.accent : t.surface)
+          .when(Boolean(s.worktree), (el) => el.child(svg("mods/herdr-chat/icons/check.svg").size(9).text_color(t.solid_foreground))))
         .child(div().text_color(s.worktree ? t.foreground : t.muted).child("Worktree"))))
       .when(Boolean(machineColor(view.machine)), (el) => el.child(h_flex().gap(6).px(8).py(3).items_center().text_size(11.5)
         .text_color(machineColor(view.machine)).tooltip(`Running on ${view.machine ?? "this computer"}`)
