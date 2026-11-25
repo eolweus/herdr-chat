@@ -54,6 +54,7 @@ export default class HerdrChat extends View {
     if (p.file) return void (this.other = new FileView(p, cx));
     if (p.mcp) return void (this.other = new McpDialog(p.mcp, cx));
     this.key = p.key ?? null;
+    cx.bind_keys([{ keystroke: "tab", action: "herdr-chat-complete", context: "HerdrChatCommands" }]);
     this.machine = p.machine || null;
     this.cwd = p.cwd ?? focused()?.cwd ?? null;
     this.items = [];
@@ -1078,6 +1079,8 @@ export default class HerdrChat extends View {
       .when(Boolean(restore), (el) => el.child(div().id(`restore-${restore.n}`).absolute().top(restore.at - 1).left(0).w(1).h(1)
         .on_size_change((_s, cx) => this.mergeOlder(cx))));
     return v_flex().id("root").track_focus(this.handle).size_full().bg(t.background).text_color(t.foreground)
+      .when(this.commandMatches().length > 0, (el) => el.key_context("HerdrChatCommands"))
+      .on_action("herdr-chat-complete", (_e, cx) => { const cmds = this.commandMatches(); if (cmds.length) this.complete(cmds[this.commandAt] ?? cmds[0], cx); })
       .on_key_down((e, cx) => this.key(e, cx))
       .on_drop((e, cx) => cx.spawn(async (cx) => this.drop(e.paths, cx)))
       .on_click((_e, cx) => { this.findPane(); cx.notify(); })
