@@ -151,7 +151,7 @@ export default class HerdrChat extends View {
     if (!this.key || !this.pane) return;
     const s = this.state;
     const data = {
-      key: this.key, pane: this.pane, machine: this.machine, folder: tilde(this.cwd, this.home), branch: this.branch ?? null,
+      key: this.key, pane: this.pane, machine: this.machine, session: this.state.session ?? null, folder: tilde(this.cwd, this.home), branch: this.branch ?? null,
       model: s.model, mode: s.mode, usage: s.usage ?? null, context: s.context, outputs: this.outputs(), mcp: s.mcp ?? [], remote: s.remote ?? null, remotePending: this.remotePending, tasks: s.tasks ?? [], prs: s.prs ?? [], repos: s.repos ?? [], memory: s.memory ?? null, title: s.title ?? null,
     };
     const json = JSON.stringify(data);
