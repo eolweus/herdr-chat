@@ -7,6 +7,17 @@ import { machineColor } from "./composer.js";
 
 const DOCS = /\.(md|markdown|html?|pdf)$/i;
 
+const PR_FIELDS = "number,title,state,isDraft,additions,deletions,statusCheckRollup";
+const PR_MS = 60000;
+
+function checks(rollup) {
+  const states = (rollup ?? []).map((c) => (c.conclusion || c.state || c.status || "").toUpperCase());
+  if (!states.length) return null;
+  if (states.some((s) => ["FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"].includes(s))) return "failed";
+  if (states.some((s) => ["PENDING", "IN_PROGRESS", "QUEUED", "EXPECTED", "WAITING", ""].includes(s))) return "pending";
+  return "passed";
+}
+
 const fmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1)}k` : String(n));
 
 const COLORS = { messages: "ansi4", mcp_tools: "ansi1", system_tools: "ansi2", skills: "ansi3", custom_agents: "ansi5", memory_files: "ansi6" };
@@ -17,6 +28,7 @@ export class Panel {
   constructor(cx) {
     this.cx = cx;
     this.terms = new Map();
+    this.prs = new Map();
     cx.timer.every(3000, () => this.poll());
   }
 
@@ -44,6 +56,20 @@ export class Panel {
     try { await term.refresh((p) => (h && p?.startsWith(h) ? `~${p.slice(h.length)}` : p ?? "")); } catch {}
     this.busy = false;
     this.cx.notify();
+  }
+
+  // gh answers for any machine's PR, so the Mac asks; once a minute per PR while it's shown.
+  pr(url) {
+    const c = this.prs.get(url);
+    if (!c || (!c.busy && Date.now() - c.at > PR_MS)) {
+      const next = { data: c?.data ?? null, at: Date.now(), busy: true };
+      this.prs.set(url, next);
+      exec("/bin/zsh", ["-lc", `exec gh pr view "$1" --json ${PR_FIELDS}`, "zsh", url], { timeout: 20000 })
+        .then((r) => { if (r.code === 0) next.data = JSON.parse(r.stdout); })
+        .catch(() => {})
+        .finally(() => { next.busy = false; next.at = Date.now(); this.cx.notify(); });
+    }
+    return c?.data ?? null;
   }
 
   render() {
@@ -120,7 +146,23 @@ export class Panel {
     const outputs = section("Outputs")
       .when(!docs.length, (el) => el.child(div().text_size(12).text_color(t.dim).child("Documents, pages and PDFs Claude writes show up here.")))
       .children(docs.map((o, i) => file(o, i, "out")));
-    const changes = a.outputs?.length ? section("Changes").children(a.outputs.map((o, i) => file(o, i, "change"))) : null;
+    const prs = (a.prs ?? []).map((url) => ({ url, repo: url.split("/").slice(3, 5).join("/"), d: this.pr(url) })).filter((p) => p.d?.state === "OPEN");
+    const repos = (a.repos ?? []).filter((r) => !prs.some((p) => p.repo === r.remote));
+    const lines = (add, del, rest) => h_flex().gap(6).text_size(11.5)
+      .when(Boolean(rest), (el) => el.child(div().text_color(t.dim).child(rest)))
+      .child(div().text_color(t.ansi2).child(`+${add}`)).child(div().text_color(t.ansi1).child(`−${del}`));
+    const change = (id, icon, tint, title, sub, dot, click) => h_flex().id(id).gap(10).items_start().min_w(0).py(3).rounded(6)
+      .cursor_pointer().hover((s) => s.bg(t.hover)).on_click(click)
+      .child(svg(`mods/herdr-chat/icons/${icon}.svg`).size(15).mt(1).flex_none().text_color(tint))
+      .child(v_flex().flex_1().min_w(0).gap(2).child(div().truncate().text_size(12.5).child(title)).child(sub))
+      .when(Boolean(dot), (el) => el.child(div().size(7).mt(14).mr(4).flex_none().rounded(4).bg(dot)));
+    const checkColor = { passed: t.done, pending: t.working, failed: t.blocked };
+    const changes = prs.length || repos.length ? section("Changes")
+      .children(prs.map((p, i) => change(`pr-${i}`, "git-pull-request", p.d.isDraft ? t.dim : t.ansi2, p.d.title,
+        lines(p.d.additions, p.d.deletions, `#${p.d.number}`), checkColor[checks(p.d.statusCheckRollup)], () => exec("open", [p.url]))))
+      .children(repos.map((r, i) => change(`repo-${i}`, "git-branch", t.dim, r.name,
+        lines(r.add, r.del, `${r.files} ${r.files === 1 ? "file" : "files"}`), null,
+        () => { run("layout.select", { stack: "panel-body", child: "changes" }); run("layout.show", { id: "panel" }); }))) : null;
     const tasks = a.tasks?.length ? section("Running tasks").children(a.tasks.map((k) => row(k.type.includes("agent") ? "bot" : "terminal", k.description || k.type))) : null;
 
     const mcp = a.mcp?.length ? section("Needs sign-in").children(a.mcp.map((m) => h_flex().gap(10).items_center().min_w(0).text_size(12.5)
