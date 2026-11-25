@@ -360,6 +360,7 @@ export default class HerdrChat extends View {
   }
 
   async receive(m, cx) {
+    this.ensure();
     if (this.side.receive(m)) return;
     if (m.type === "hello" && m.v !== PROTOCOL) this.error = `engine speaks protocol ${m.v}, this pane ${PROTOCOL}`;
     else if (m.type === "error") { this.error = m.message; this.remotePending = false; this.publish(); }
@@ -980,7 +981,15 @@ export default class HerdrChat extends View {
     }
   }
 
+  // A saved mod file reloads open panes without running init, so state added since then is made here.
+  ensure() {
+    this.quotes ??= [];
+    this.origin ??= { x: 0, y: 0 };
+    this.side ??= new SidePanel(this);
+  }
+
   addQuote(text, cx) {
+    this.ensure();
     if (!text?.trim()) return;
     this.quotes.push(text.trim());
     this.selection = null;
@@ -995,6 +1004,7 @@ export default class HerdrChat extends View {
 
   // A settled selection in a reply offers to quote it; a selection cleared elsewhere doesn't hide another's bar.
   selected(key, sel, cx) {
+    this.ensure();
     if (sel?.text && sel.position) this.selection = { key, text: sel.text, x: sel.position.x - this.origin.x, y: sel.position.y - this.origin.y };
     else if (this.selection?.key === key) this.selection = null;
     else return;
@@ -1127,6 +1137,7 @@ export default class HerdrChat extends View {
 
   render() {
     if (this.other) return this.other.render();
+    this.ensure();
     this.takePick();
     const t = theme();
     const children = new Map();
