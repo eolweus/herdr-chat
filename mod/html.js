@@ -1,4 +1,4 @@
-import { exec, hc, notify } from "herdr";
+import { exec, focused, hc, notify, panes } from "herdr";
 
 // Same names as the Artifacts page uses, so it lists these servers and reuses its own.
 const hash = (s) => {
@@ -46,25 +46,23 @@ async function reach(machine, port) {
 }
 
 const browser = (args) => exec("/bin/zsh", ["-lc", 'exec herdr-browser "$@"', "zsh", ...args], { timeout: 30000 });
-// One browser per tab: later pages load in it instead of opening another pane.
-const shown = new Map();
+
+// A browser already shown in the chat's tab, else in the tab on screen, takes the page instead of a new pane.
+async function nearby(tab) {
+  const ls = (await browser(["ls"])).stdout.split("\n").map((l) => l.split("\t")[0]).filter(Boolean);
+  const where = (t) => panes().find((x) => x.tab === t && ls.includes(x.terminal))?.terminal;
+  return (tab && where(tab)) ?? where(focused()?.tab);
+}
 
 // HTML opens in a terminal browser beside the chat; another machine's folder is served first.
 export async function openHtml(path, machine, beside, tab) {
   try {
     const dir = path.slice(0, path.lastIndexOf("/")) || "/";
     const url = machine ? (await reach(machine, await serve(machine, dir))) + encodeURI(path.slice(dir.length)) : `file://${encodeURI(path)}`;
-    const t = shown.get(tab);
-    if (t) {
-      const ls = await browser(["ls"]);
-      if (ls.stdout.split("\n").some((l) => l.startsWith(`${t}\t`) && l.includes("\tshown\t"))) {
-        const r = await browser(["action", t, "--", "open", url]);
-        if (r.code === 0) return;
-      }
-    }
+    const t = await nearby(tab);
+    if (t && (await browser(["action", t, "--", "open", url])).code === 0) return;
     const r = await browser(["open", url, "--right", ...(beside ? ["--pane", beside] : [])]);
     if (r.code !== 0) throw new Error(r.stderr.trim() || "herdr-browser failed");
-    if (tab) shown.set(tab, r.stdout.trim().split(" ")[0]);
   } catch (e) {
     notify({ title: "Couldn't open the page", body: String(e?.message ?? e), level: "error" });
   }
