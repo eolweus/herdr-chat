@@ -27,6 +27,7 @@ type Pending = {
 };
 
 const FLUSH_MS = 50;
+const IDLE_MS = 5 * 60_000, WARM_MS = 60_000;
 const label = (name: string) => name.split(":").pop()!.replace(/^claude\.ai /, "");
 
 let knownCommands: State["commands"] = [];
@@ -158,7 +159,22 @@ export class Session {
     this.start();
     await this.loadCommands();
     await this.usage();
-    this.mcp();
+    await this.mcp();
+    this.rest(WARM_MS);
+  }
+
+  private resting: ReturnType<typeof setTimeout> | null = null;
+  private rested: Query | null = null;
+
+  // A resumed CLI picks up where this one stopped, so an idle chat needn't keep its CLI and MCP servers running.
+  protected rest(ms = IDLE_MS) {
+    if (this.resting) clearTimeout(this.resting);
+    this.resting = setTimeout(() => {
+      this.resting = null;
+      if (!this.q || this.state.busy || this.pending.size || this.queued.length || this.wantRemote || this.state.tasks.length) return;
+      this.rested = this.q;
+      this.q.close();
+    }, ms);
   }
 
   // summary falls back to the latest prompt, and a long transcript's name can be beyond the SDK's read, so keep the last name.
@@ -329,7 +345,7 @@ export class Session {
       try {
         for await (const msg of q) this.receive(msg);
       } catch (e) {
-        this.n.notice("error", String(e instanceof Error ? e.message : e));
+        if (this.rested !== q) this.n.notice("error", String(e instanceof Error ? e.message : e));
       } finally {
         if (this.q === q) this.q = null;
         this.box.close();
@@ -372,6 +388,7 @@ export class Session {
       if (this.wantRemote && !this.state.remote) this.remote(true).catch(() => {});
     }
     if (msg.type === "system" && msg.subtype === "commands_changed") knownCommands = this.state.commands;
+    if (msg.type === "system" && msg.subtype === "background_tasks_changed") this.rest();
     if (this.state.session !== before) this.onSession(this);
     if (msg.type === "result") {
       this.usage();
@@ -380,6 +397,7 @@ export class Session {
       this.title();
       setTimeout(() => this.title(), 8000);
       this.linkPrs();
+      this.rest();
       const next = this.queued.shift();
       if (next) { this.send(next); this.changed(); }
     }
@@ -414,10 +432,12 @@ export class Session {
     const r = await (this.q as any).enableRemoteControl(enabled, enabled ? name : undefined);
     this.n.setState({ remote: enabled ? (r?.session_url ?? null) : null });
     this.schedule();
+    if (!enabled) this.rest();
   }
 
   protected async ready() {
     if (!this.q) this.start();
+    this.rest();
     await this.q!.initializationResult();
   }
 
