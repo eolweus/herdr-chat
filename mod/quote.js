@@ -1,5 +1,5 @@
 import { div } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
+import { v_flex, h_flex, Input } from "gpui-base";
 
 // The Claude desktop app's reply format, so Claude reads quotes the same way in both: each quote, then the reply to it.
 const MARK = /^<!-- reply(?: \d+)? -->$/;
@@ -55,7 +55,8 @@ export function quoteChips(quotes, t, idPrefix, onRemove) {
   return v_flex().gap(6).px(10).pt(8).children(quotes.map((q, i) => h_flex().gap(8).items_start()
     .child(v_flex().flex_1().min_w(0).gap(2)
       .child(div().pl(8).border_l_2().border_color(t.accent).text_size(12.5).text_color(t.muted).child(clip(q.text, 240)))
-      .when(Boolean(q.comment), (el) => el.child(div().pl(10).text_size(12.5).text_color(t.foreground).child(clip(q.comment, 240)))))
+      .when(Boolean(q.input), (el) => el.child(div().pl(10).child(Input.new(q.input).w_full().text_size(13))))
+      .when(!q.input && Boolean(q.comment), (el) => el.child(div().pl(10).text_size(12.5).text_color(t.foreground).child(clip(q.comment, 240)))))
     .child(div().id(`${idPrefix}-${i}`).flex_none().px(4).cursor_pointer().text_size(11).text_color(t.dim)
       .hover((s) => s.text_color(t.foreground)).tooltip("Remove quote")
       .on_click((_e, cx) => { cx.stop_propagation(); onRemove(i, cx); }).child("✕"))));

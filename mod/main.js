@@ -125,7 +125,7 @@ export default class HerdrChat extends View {
       const shown = this.visible();
       this.shownSince = shown ? this.shownSince ?? Date.now() : null;
       if (shown && !this.shown) this.claimUntil = Date.now() + 1000;
-      if (shown && (this.handle.is_focused() || (Date.now() < this.claimUntil && !this.side.focused))) this.input.focus();
+      if (shown && (this.handle.is_focused() || (Date.now() < this.claimUntil && !this.side.focused && !this.quoteFocused))) this.input.focus();
       this.shown = shown;
       // The engine starts a stopped chat's CLI once it has been looked at for a moment, and keeps it while it is.
       const viewing = shown && Date.now() - this.shownSince >= VIEW_MS;
@@ -685,7 +685,7 @@ export default class HerdrChat extends View {
       if (waiting.kind === "permission") this.answer({ item: waiting.id, decision: "deny", message: text }, cx);
       else this.answer({ item: waiting.id, answers: null, message: `The user replied instead of picking: ${text}` }, cx);
     }
-    this.prompt(withQuotes(this.quotes, text), this.attachments.filter((a) => a.data).map(({ type, data }) => ({ type, data })));
+    this.prompt(withQuotes(this.quotesOut(), text), this.attachments.filter((a) => a.data).map(({ type, data }) => ({ type, data })));
     this.input.set_value("");
     this.attachments = [];
     this.quotes = [];
@@ -838,7 +838,7 @@ export default class HerdrChat extends View {
     this.send({ type: "rewind", id: c.id, files: Boolean(c.restore && c.files?.length) });
     if (c.edit) {
       const { quotes, body } = splitQuotes(c.text);
-      this.quotes = quotes;
+      this.quotes = quotes.map((q) => ({ text: q.text, input: this.quoteInput(q.comment) }));
       this.setDraft(body);
     }
     cx.notify();
@@ -988,20 +988,31 @@ export default class HerdrChat extends View {
     this.origin ??= { x: 0, y: 0 };
     if (render) return;
     this.side ??= new SidePanel(this);
-    if (!this.reply) {
-      this.reply = InputState.new({ placeholder: "Reply to this…" });
-      this.reply.on("submit", (_e, cx) => this.quoteSelection(false, cx));
-    }
+  }
+
+  // Each quote gets its own reply box in the message box, like the desktop app; made in a click, never in render.
+  quoteInput(comment = "") {
+    const input = InputState.new({ placeholder: "Reply to this quote…" });
+    if (comment) input.set_value(comment);
+    input.on("focus", () => { this.quoteFocused = true; });
+    input.on("blur", () => { this.quoteFocused = false; });
+    input.on("submit", (_e, cx) => { this.input.focus(); cx.notify(); });
+    return input;
   }
 
 
-  addQuote(text, cx, comment = "") {
+  addQuote(text, cx) {
     this.ensure();
     if (!text?.trim()) return;
-    this.quotes.push({ text: text.trim(), comment: comment.trim() });
+    const input = this.quoteInput();
+    this.quotes.push({ text: text.trim(), input });
     this.selection = null;
-    this.input.focus();
+    input.focus();
     cx.notify();
+  }
+
+  quotesOut() {
+    return this.quotes.map((q) => ({ text: q.text, comment: q.input?.value() ?? q.comment ?? "" }));
   }
 
   removeQuote(i, cx) {
@@ -1015,24 +1026,12 @@ export default class HerdrChat extends View {
     this.ensure();
     if (sel?.text && sel.position) {
       this.selection = { key, text: sel.text, x: sel.position.x - this.origin.x, y: sel.position.y - this.origin.y };
-      this.reply.set_value("");
     }
     else if (this.selection?.key === key && !this.selection.pressed) {
       const s = this.selection;
       return cx.timer.after(350, (cx) => { if (this.selection === s && !s.pressed) { this.selection = null; cx.notify(); } });
     } else return;
     cx.notify();
-  }
-
-  // Like the desktop app: a quote can carry its own reply, so several quotes each get their answer in one message.
-  quoteSelection(aside, cx) {
-    const s = this.selection;
-    if (!s) return;
-    const comment = this.reply.value();
-    this.selection = null;
-    this.reply.set_value("");
-    if (aside) this.side.quote(s.text, cx, comment);
-    else this.addQuote(s.text, cx, comment);
   }
 
   dismissSelection(cx) {
@@ -1043,17 +1042,16 @@ export default class HerdrChat extends View {
 
   selectionBar(t) {
     const s = this.selection;
-    const btn = (id, label, tip, fn) => div().id(id).flex_none().px(8).py(3).rounded(6).cursor_pointer().text_size(12).text_color(t.foreground)
+    const btn = (id, label, tip, fn) => div().id(id).px(9).py(4).rounded(6).cursor_pointer().text_size(12).text_color(t.foreground)
       .hover((st) => st.bg(t.hover)).tooltip(tip).on_click((_e, cx) => { cx.stop_propagation(); fn(cx); }).child(label);
-    const left = Math.max(8, Math.min(s.x - 140, (this.width ?? 0) - 400));
-    return h_flex().id("selection-bar").absolute().left(left).top(s.y + 10).w(390).pl(10).pr(3).py(3).gap(4).items_center()
-      .rounded(9).border_1().border_color(t.accent).bg(t.surface).shadow_lg()
+    const left = Math.max(8, Math.min(s.x - 90, (this.width ?? 0) - 220));
+    return h_flex().id("selection-bar").absolute().left(left).top(s.y + 10).p(3).gap(2).rounded(8).border_1().border_color(t.border).bg(t.surface).shadow_lg()
       .on_mouse_down("left", (_e, cx) => { s.pressed = true; cx.stop_propagation(); })
-      .on_mouse_down_out((_e, cx) => { if (this.selection === s) { this.selection = null; cx.notify(); } })
-      .child(div().flex_1().min_w(0).child(Input.new(this.reply).w_full().text_size(12.5)))
-      .child(btn("sel-quote", "Quote", "Add this quote and your reply to the message (Enter)", (cx) => this.quoteSelection(false, cx)))
-      .child(btn("sel-side", "Ask aside", "Ask about this in the side chat", (cx) => this.quoteSelection(true, cx)));
+      .on_mouse_down_out((_e, cx) => { if (this.selection === s && s.pressed) { this.selection = null; cx.notify(); } })
+      .child(btn("sel-quote", "Quote", "Quote this in your message, with a reply of its own", (cx) => this.addQuote(s.text, cx)))
+      .child(btn("sel-side", "Ask aside", "Ask about this in the side chat", (cx) => { this.selection = null; this.side.quote(s.text, cx); }));
   }
+
 
 
   removeAttachment(i, cx) {
@@ -1228,6 +1226,6 @@ export default class HerdrChat extends View {
           : this.empty(t))
         .child(h_flex().w_full().justify_center().flex_none().child(composer(this, t))))
       .when(Boolean(this.side?.open), (el) => el.child(this.side.render(t)))
-      .when(Boolean(this.selection && this.reply), (el) => el.child(this.selectionBar(t)));
+      .when(Boolean(this.selection && this.side), (el) => el.child(this.selectionBar(t)));
   }
 }

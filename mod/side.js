@@ -63,14 +63,16 @@ export class SidePanel {
     this.status = null;
   }
 
-  quote(text, cx, comment = "") {
-    this.quotes.push({ text, comment: comment.trim() });
-    if (comment.trim()) this.ask("", cx);
-    else this.show(cx);
+  quote(text, cx) {
+    const input = this.view.quoteInput();
+    input.on("submit", (_e, cx) => { this.input.focus(); cx.notify(); });
+    this.quotes.push({ text, input });
+    this.show(cx);
+    input.focus();
   }
 
   ask(text, cx) {
-    const said = withQuotes(this.quotes, text.trim());
+    const said = withQuotes(this.quotes.map((q) => ({ text: q.text, comment: q.input?.value() ?? "" })), text.trim());
     if (!said) return;
     if (!this.view.state.session) {
       this.upsert({ id: `side-note:${Date.now()}`, kind: "notice", level: "warning", text: "Send a message in this chat first, so there's a conversation to fork." });
