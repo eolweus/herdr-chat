@@ -123,10 +123,11 @@ export default class HerdrChat extends View {
       if (!this.pane) this.findPane();
       if (this.links.pending.size) cx.spawn(async (cx) => { if (await this.links.check(this.cwd, this.machine)) cx.notify(); });
       const shown = this.visible();
-      if (shown && (!this.shown || this.handle.is_focused())) this.input.focus();
+      this.shownSince = shown ? this.shownSince ?? Date.now() : null;
+      // A neighbour closing (the editor, the pane a reload replaced) hands back the pane after our focus, so keep at it briefly.
+      if (shown && (!this.shown || this.handle.is_focused() || (Date.now() - this.shownSince < 1000 && !this.side.focused))) this.input.focus();
       this.shown = shown;
       // The engine starts a stopped chat's CLI once it has been looked at for a moment, and keeps it while it is.
-      this.shownSince = shown ? this.shownSince ?? Date.now() : null;
       const viewing = shown && Date.now() - this.shownSince >= VIEW_MS;
       if (viewing !== this.viewing) { this.viewing = viewing; this.send({ type: "view", on: viewing }); }
       this.pageAndImages(cx);
