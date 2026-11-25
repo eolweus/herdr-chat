@@ -54,7 +54,9 @@ export default class HerdrChat extends View {
     if (p.file) return void (this.other = new FileView(p, cx));
     if (p.mcp) return void (this.other = new McpDialog(p.mcp, cx));
     this.key = p.key ?? null;
-    cx.bind_keys([{ keystroke: "tab", action: "herdr-chat-complete", context: "HerdrChatCommands" }]);
+    // The input's own up/down bindings sit deeper than this view, so the list's keys are bound inside it too.
+    cx.bind_keys([["tab", "herdr-chat-complete"], ["up", "herdr-chat-up"], ["down", "herdr-chat-down"], ["ctrl-k", "herdr-chat-up"], ["ctrl-j", "herdr-chat-down"]]
+      .flatMap(([keystroke, action]) => ["HerdrChatCommands", "HerdrChatCommands > Input"].map((context) => ({ keystroke, action, context }))));
     this.machine = p.machine || null;
     this.cwd = p.cwd ?? focused()?.cwd ?? null;
     this.items = [];
@@ -963,12 +965,17 @@ export default class HerdrChat extends View {
     cx.notify();
   }
 
+  moveCommand(by, cx) {
+    const n = this.commandMatches().length;
+    if (!n) return;
+    this.commandAt = (this.commandAt + by + n) % n;
+    cx.notify();
+  }
+
   key(e, cx) {
     const cmds = this.commandMatches();
-    if (cmds.length && (e.keystroke === "up" || e.keystroke === "down")) {
-      this.commandAt = (this.commandAt + (e.keystroke === "down" ? 1 : cmds.length - 1)) % cmds.length;
-      cx.notify();
-    } else if (cmds.length && e.keystroke === "tab") this.complete(cmds[this.commandAt] ?? cmds[0], cx);
+    if (cmds.length && (e.keystroke === "up" || e.keystroke === "down")) this.moveCommand(e.keystroke === "down" ? 1 : -1, cx);
+    else if (cmds.length && e.keystroke === "tab") this.complete(cmds[this.commandAt] ?? cmds[0], cx);
     else if (cmds.length && e.keystroke === "escape") { this.dismissed = this.slashToken()?.start ?? null; cx.notify(); }
     else if (this.modelMenu && e.keystroke === "escape") { this.modelMenu = false; cx.notify(); }
     else if (e.keystroke === "escape" && this.state.busy) this.interrupt(cx);
@@ -1101,6 +1108,8 @@ export default class HerdrChat extends View {
     return v_flex().id("root").track_focus(this.handle).size_full().bg(t.background).text_color(t.foreground)
       .when(this.commandMatches().length > 0, (el) => el.key_context("HerdrChatCommands"))
       .on_action("herdr-chat-complete", (_e, cx) => { const cmds = this.commandMatches(); if (cmds.length) this.complete(cmds[this.commandAt] ?? cmds[0], cx); })
+      .on_action("herdr-chat-up", (_e, cx) => this.moveCommand(-1, cx))
+      .on_action("herdr-chat-down", (_e, cx) => this.moveCommand(1, cx))
       .on_key_down((e, cx) => this.key(e, cx))
       .on_drop((e, cx) => cx.spawn(async (cx) => this.drop(e.paths, cx)))
       .on_click((_e, cx) => { this.findPane(); cx.notify(); })
