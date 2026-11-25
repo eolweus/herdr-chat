@@ -63,9 +63,10 @@ export class SidePanel {
     this.status = null;
   }
 
-  quote(text, cx) {
-    this.quotes.push(text);
-    this.show(cx);
+  quote(text, cx, comment = "") {
+    this.quotes.push({ text, comment: comment.trim() });
+    if (comment.trim()) this.ask("", cx);
+    else this.show(cx);
   }
 
   ask(text, cx) {
