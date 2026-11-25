@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { statSync } from "node:fs";
 import { listSessions } from "@anthropic-ai/claude-agent-sdk";
 import { AcpClient } from "./acp";
 import { AcpSession } from "./acp-session";
@@ -20,17 +21,24 @@ type Agent = {
 const HOME = process.env.HOME!;
 const CLAUDE_DIR = `${process.env.CLAUDE_CONFIG_DIR ?? `${HOME}/.claude`}/projects`;
 const AGY_DIR = `${HOME}/.gemini/antigravity-cli/conversations`;
+// The history pane looks this far back; older chats are rarely what you're after.
+const RECENT_MS = 90 * 86_400_000;
+const recent = (dir: string, glob: string) => {
+  const since = Date.now() - RECENT_MS;
+  return [...new Bun.Glob(glob).scanSync(dir)].filter((f) => { try { return statSync(`${dir}/${f}`).mtimeMs >= since; } catch { return false; } });
+};
 const escape = (q: string) => q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // The first match in each file, as `path:text`; a session's id is its file's name.
-async function rg(dir: string, args: string[]) {
-  const p = Bun.spawn(["rg", "--no-heading", "--with-filename", "-i", "-o", "-m", "1", ...args, dir], { stdout: "pipe", stderr: "ignore" });
+async function rg(dir: string, files: string[], args: string[]) {
+  if (!files.length) return new Map<string, string>();
+  const p = Bun.spawn(["rg", "--no-heading", "--with-filename", "-i", "-o", "-m", "1", ...args, "--", ...files], { cwd: dir, stdout: "pipe", stderr: "ignore" });
   const timer = setTimeout(() => p.kill(), 20_000);
   const out = await new Response(p.stdout).text();
   clearTimeout(timer);
   const found = new Map<string, string>();
   for (const line of out.split("\n")) {
-    const m = line.match(/^(.*?\/([0-9a-f-]{36})\.(?:jsonl|db)):(.*)$/);
+    const m = line.match(/^((?:.*?\/)?([0-9a-f-]{36})\.(?:jsonl|db)):(.*)$/);
     if (m && !found.has(m[2]!)) found.set(m[2]!, m[3]!);
   }
   return found;
@@ -54,7 +62,7 @@ async function claudeGrep(q: string) {
   const q1 = escape(q), any = `(?:[^"\\\\]|\\\\.)`;
   // Text that opens with a tag is a note the harness added (<system-reminder>, <command-name>), not the conversation.
   const text = `"(?:text|content)":"(?:${q1}|[^<"\\\\]${any}{0,4000}?${q1})${any}{0,80}`;
-  const found = await rg(CLAUDE_DIR, ["--max-depth", "2", "-g", "*.jsonl", "-e", text]);
+  const found = await rg(CLAUDE_DIR, recent(CLAUDE_DIR, "*/*.jsonl"), ["-e", text]);
   for (const [id, raw] of found) {
     let s = raw.replace(/^"(?:text|content)":"/, "");
     try { s = JSON.parse(`"${s.replace(/\\$/, "")}"`); } catch {}
@@ -97,7 +105,7 @@ async function agyGrep(q: string) {
   const found = new Map<string, string>();
   if (!hasAgy()) return found;
   const needle = q.toLowerCase();
-  for (const f of new Bun.Glob("*.db").scanSync(AGY_DIR)) {
+  for (const f of recent(AGY_DIR, "*.db")) {
     let db: Database | null = null;
     try {
       // Read-only needs agy's lock files; a conversation agy isn't using has none, and nothing writes it then.
@@ -144,7 +152,7 @@ export async function searchChats(q: string, limit = 100): Promise<PastChat[]> {
   q = q.trim();
   const all = await each(async (backend, a) => {
     const [chats, hits] = await Promise.all([a.past(null), q ? a.grep(q) : new Map<string, string>()]);
-    return chats.filter((c) => !q || hits.has(c.id) || c.title.toLowerCase().includes(q.toLowerCase()))
+    return chats.filter((c) => c.when >= Date.now() - RECENT_MS).filter((c) => !q || hits.has(c.id) || c.title.toLowerCase().includes(q.toLowerCase()))
       .map((c) => ({ ...c, backend, ...(hits.has(c.id) && { snippet: hits.get(c.id) }) }));
   });
   return all.sort((a, b) => b.when - a.when).slice(0, limit);
