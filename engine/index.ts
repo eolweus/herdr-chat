@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import type { ServerWebSocket } from "bun";
 import { Session, userSettings, type Client, type Handoff } from "./src/session";
 import { ReplaySession } from "./src/replay";
-import { agentFor, pastChats } from "./src/agents";
+import { agentFor, pastChats, searchChats } from "./src/agents";
 import { refreshLimits } from "./src/limits";
 import { refreshGemini } from "./src/agy-cache";
 import { projectServers } from "./src/projects";
@@ -116,6 +116,7 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
     if (!existsSync(s.cwd)) ws.send(JSON.stringify({ type: "error", message: `${s.cwd} doesn't exist on this machine` }));
     return;
   }
+  if (m.type === "history") return ws.send(JSON.stringify({ type: "history", id: m.id ?? null, chats: replay >= 0 ? [] : await searchChats(String(m.q ?? "")) }));
   const s = d.session;
   if (!s) return;
   if (m.type === "older") return ws.send(JSON.stringify(s.older(String(m.before))));
