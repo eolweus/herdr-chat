@@ -18,6 +18,7 @@ import { PROTOCOL, endpoint, openAuth } from "./engine.js";
 import { FileLinks, openFile } from "./filelinks.js";
 
 const DATA = "data/herdr-chat";
+const VIEW_MS = 800;
 const IMAGE_EXT = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
 const imageRel = (id, i, type) => `${DATA}/img/${safe(id)}-${i}.${IMAGE_EXT[type] ?? "png"}`;
 const MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
@@ -109,6 +110,10 @@ export default class HerdrChat extends View {
       const shown = this.visible();
       if (shown && (!this.shown || this.handle.is_focused())) this.input.focus();
       this.shown = shown;
+      // The engine starts a stopped chat's CLI once it has been looked at for a moment, and keeps it while it is.
+      this.shownSince = shown ? this.shownSince ?? Date.now() : null;
+      const viewing = shown && Date.now() - this.shownSince >= VIEW_MS;
+      if (viewing !== this.viewing) { this.viewing = viewing; this.send({ type: "view", on: viewing }); }
       this.pageAndImages(cx);
     });
     cx.spawn(async (cx) => this.connect(cx));
@@ -310,6 +315,7 @@ export default class HerdrChat extends View {
         this.ws = await WebSocket.connect(url);
         await this.ws.write(JSON.stringify({ type: "hello", v: PROTOCOL, token }));
         await this.ws.write(JSON.stringify({ type: "open", key: this.key, cwd: this.cwd }));
+        if (this.viewing) this.send({ type: "view", on: true });
         this.conn = "connected";
         this.error = null;
         delay = 1000;

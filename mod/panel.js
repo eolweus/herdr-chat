@@ -187,7 +187,7 @@ export class Panel {
         .child(div().id("memory-total").text_size(12).text_color(t.dim).child(m ? `${m.approx ? "≈ " : ""}${size(m.mb)}` : "Not running")
           .when(Boolean(m?.approx), (el) => el.tooltip("Counts memory that processes share in each of them, so it runs high"))))
       .when(open && !m, (el) => el.child(div().text_size(12).text_color(t.dim)
-        .child("Claude stops after 5 idle minutes and starts again with your next message.")))
+        .child("Claude stops after 5 idle minutes, or sooner when other chats need room, and starts again when you open the chat.")))
       .when(open && Boolean(m), (el) => el
         .child(h_flex().w_full().h(6).rounded(3).bg(t.raised).overflow_hidden()
           .children(m.parts.map((p, i) => div().h_full().flex_basis(0).flex_grow(Math.max(p.mb, 1)).bg(part(i)))))
