@@ -139,7 +139,7 @@ export class Panel {
         .cursor_pointer().hover((s) => s.bg(t.hover))
         .on_click((_e, cx) => openFile(cx, o.path, a.machine ?? null, { beside: a.pane ?? null }))
         .child(svg(`mods/herdr-chat/icons/${o.created ? "file" : "square-pen"}.svg`).size(14).flex_none().text_color(t.dim))
-        .child(div().flex_1().min_w(0).truncate().child(o.name))
+        .tooltip(o.path).child(div().flex_1().min_w(0).truncate().child(`…/${o.path.split("/").pop()}`))
         .when(o.add > 0, (el) => el.child(div().text_size(11.5).text_color(t.ansi2).child(`+${o.add}`)))
         .when(o.del > 0, (el) => el.child(div().text_size(11.5).text_color(t.ansi1).child(`-${o.del}`)));
     const docs = (a.outputs ?? []).filter((o) => DOCS.test(o.path));
