@@ -225,7 +225,8 @@ async function api(req: Request, path: string): Promise<Response> {
     if (!existsSync(cwd)) return json({ error: `${cwd} doesn't exist on this machine` }, 400);
     const s = open(key, cwd);
     await s.load();
-    s.handoff = { id: String(b.id), title: b.title ? String(b.title) : null, from: String(b.from ?? ""), result: null };
+    const kind = ["orchestrated", "standalone"].includes(b.kind) ? b.kind : "once";
+    s.handoff = { id: String(b.id), title: b.title ? String(b.title) : null, from: String(b.from ?? ""), kind, result: null, report: null };
     delete panes[key]?.closed;
     remember(s);
     if (b.mode) await s.set({ mode: String(b.mode) });
@@ -253,7 +254,11 @@ async function api(req: Request, path: string): Promise<Response> {
     return json({ ok: true });
   }
   if (path === "/api/result") {
-    if (s.handoff) s.handoff.result = b.result === "failed" ? "failed" : "done";
+    if (s.handoff) {
+      const status = ["update", "blocked", "done", "failed"].includes(b.result) ? b.result : "done";
+      s.handoff.report = { status, note: String(b.note ?? "").slice(0, 200), at: new Date().toISOString() };
+      s.handoff.result = status === "done" || status === "failed" ? status : null;
+    }
     remember(s);
     return json({ ok: true });
   }

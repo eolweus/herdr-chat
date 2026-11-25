@@ -12,7 +12,9 @@ import { memoryOf, type Proc, type Server } from "./memory";
 
 export type Client = { send(o: unknown): void };
 
-export type Handoff = { id: string; title: string | null; from: string; result?: "done" | "failed" | null };
+export type HandoffKind = "once" | "orchestrated" | "standalone";
+export type Report = { status: "update" | "blocked" | "done" | "failed"; note: string; at: string };
+export type Handoff = { id: string; title: string | null; from: string; kind?: HandoffKind; result?: "done" | "failed" | null; report?: Report | null };
 
 export type Answer = {
   item: string;
