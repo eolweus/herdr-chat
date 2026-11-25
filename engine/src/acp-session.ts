@@ -29,6 +29,7 @@ export class AcpSession extends Session {
   override readonly backend = "agy";
   protected override agentName = "Antigravity";
   private c: AcpClient | null = null;
+  get client() { return this.c; }
   private starting: Promise<AcpClient> | null = null;
   private feed: AcpFeed;
   // agy's session id; it becomes state.session with the first message, so the folder can still change before that.
@@ -281,15 +282,6 @@ export class AcpSession extends Session {
       await this.setConfig("thought_level", s.effort);
     }
     this.schedule();
-  }
-
-  override async list(limit = 12) {
-    const c = await this.ensure();
-    const r = await c.request("session/list", { cwd: this.cwd }, 30_000);
-    return (r?.sessions ?? [])
-      .filter((x: Msg) => x.cwd === this.cwd && x.sessionId !== this.sid)
-      .slice(0, limit)
-      .map((x: Msg) => ({ id: x.sessionId, title: x.title || "Untitled", when: Date.parse(x.updatedAt) || 0, branch: null }));
   }
 
   // Starting it lists every agy conversation on this machine at antigravity.google.com; stopping it ends that for all of them.

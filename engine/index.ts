@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import type { ServerWebSocket } from "bun";
 import { Session, userSettings, type Client, type Handoff } from "./src/session";
 import { ReplaySession } from "./src/replay";
-import { AcpSession } from "./src/acp-session";
+import { agentFor, pastChats } from "./src/agents";
 import { refreshLimits } from "./src/limits";
 import { refreshGemini } from "./src/agy-cache";
 import { projectServers } from "./src/projects";
@@ -64,7 +64,7 @@ function open(key: string, cwd: string, backend?: string): Session {
   const live = sessions.get(key);
   if (live) return live;
   const known = replay < 0 ? panes[key] : undefined;
-  const Kind = replay >= 0 ? ReplaySession : (known?.backend ?? backend) === "agy" ? AcpSession : Session;
+  const Kind = replay >= 0 ? ReplaySession : agentFor(known?.backend ?? backend).Session;
   const s = new Kind(key, known?.cwd ?? cwd, known?.session ?? null, remember);
   s.handoff = known?.handoff ?? null;
   s.preamble = known?.preamble ?? null;
@@ -121,12 +121,12 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
   if (m.type === "older") return ws.send(JSON.stringify(s.older(String(m.before))));
   if (m.type === "image") return void s.image(String(m.item), Number(m.i)).then((r) => ws.send(JSON.stringify(r)));
   if (m.type === "sessions") {
-    const sessions = replay >= 0 ? [] : await s.list().catch(() => []);
+    const sessions = replay >= 0 ? [] : await pastChats(s);
     return ws.send(JSON.stringify({ type: "sessions", sessions }));
   }
   if (m.type === "resume") {
     if (s.state.busy) return ws.send(JSON.stringify({ type: "error", message: "Stop the current turn first" }));
-    return reopen(d, s, String(m.id), s.cwd);
+    return reopen(d, s, String(m.id), s.cwd, m.backend ? String(m.backend) : s.backend);
   }
   if (m.type === "rewind_check") {
     const r = await s.restoreFiles(String(m.id), true).catch(() => null);

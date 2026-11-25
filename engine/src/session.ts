@@ -1,4 +1,4 @@
-import { forkSession, getSessionInfo, getSessionMessages, listSessions, query, type Options, type PermissionResult, type PermissionUpdate, type Query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { forkSession, getSessionInfo, getSessionMessages, query, type Options, type PermissionResult, type PermissionUpdate, type Query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { totalmem } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -781,13 +781,6 @@ export class Session {
     this.side.close();
     this.side = null;
     this.broadcast({ type: "side_closed" });
-  }
-
-  async list(limit = 12) {
-    const list = await listSessions({ dir: this.cwd, limit }).catch(() => []);
-    return list.filter((x) => x.sessionId !== this.state.session && !x.archived).map((x) => ({
-      id: x.sessionId, title: x.customTitle || x.summary || x.firstPrompt || "Untitled", when: x.lastModified, branch: x.gitBranch ?? null,
-    }));
   }
 
   close() {
