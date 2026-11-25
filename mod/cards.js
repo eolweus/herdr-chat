@@ -41,7 +41,7 @@ export function permissionCard(item, t, view) {
           .child(button(`allow-${item.id}`, item.tool === "ExitPlanMode" ? "Start coding" : "Allow once", t, "primary", (_e, cx) => view.answer({ item: item.id, decision: "once" }, cx)))
           .when(item.remember, (el) => el.child(button(`session-${item.id}`, "Allow for this session", t, "", (_e, cx) => view.answer({ item: item.id, decision: "session" }, cx))))
           .child(button(`deny-${item.id}`, item.tool === "ExitPlanMode" ? "Keep planning" : "Deny", t, "danger", (_e, cx) => view.answer({ item: item.id, decision: "deny" }, cx))))
-        .child(div().text_size(11.5).text_color(t.dim).child("Or type below to deny and tell Claude what to do instead"))
+        .child(div().text_size(11.5).text_color(t.dim).child(`Or type below to deny and tell ${view.agent()} what to do instead`))
       : settled(item.tool === "ExitPlanMode" ? (item.state === "allowed" ? "Approved" : "Kept planning") : item.state === "allowed" ? "Allowed" : "Denied", t)));
 }
 

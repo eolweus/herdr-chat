@@ -56,6 +56,7 @@ export default class HerdrChat extends View {
     if (p.file) return void (this.other = new FileView(p, cx));
     if (p.mcp) return void (this.other = new McpDialog(p.mcp, cx));
     this.key = p.key ?? null;
+    this.backend = p.backend ?? null;
     // The input's own up/down bindings sit deeper than this view, so the list's keys are bound inside it too.
     cx.bind_keys([["tab", "herdr-chat-complete"], ["enter", "herdr-chat-complete"], ["up", "herdr-chat-up"], ["down", "herdr-chat-down"], ["ctrl-k", "herdr-chat-up"], ["ctrl-j", "herdr-chat-down"]]
       .flatMap(([keystroke, action]) => ["HerdrChatCommands", "HerdrChatCommands > Input"].map((context) => ({ keystroke, action, context }))));
@@ -91,7 +92,7 @@ export default class HerdrChat extends View {
     this.stick = true;
     this.pane = null;
     this.scroll = ScrollHandle.new();
-    this.input = TextareaState.new({ placeholder: "Ask Claude…" });
+    this.input = TextareaState.new({ placeholder: `Ask ${p.backend === "agy" ? "Antigravity" : "Claude"}…` });
     this.input.set_auto_grow(1, 12);
     if (p.draft) this.setDraft(p.draft);
     this.pickId = null;
@@ -139,9 +140,9 @@ export default class HerdrChat extends View {
         // Herdr says "focus" (popup closed, pane.go) and hands over the pane before the keyboard, so keep claiming it briefly.
         if (c === "focus" && (!this.pane || this.visible())) { this.input.focus(); this.claimUntil = Date.now() + 1000; }
         else if (c === "edit" && this.pane && focused()?.pane === this.pane) this.editDraft(cx).catch((e) => { this.editor = null; notify({ title: "Couldn't open the editor", body: String(e?.message ?? e), level: "error" }); });
-        else if (c === "remote" && this.active()) this.setRemote(!this.state.remote, cx);
+        else if (c === "remote" && this.active() && this.claudeOnly()) this.setRemote(!this.state.remote, cx);
         else if (c === "compact" && this.active()) this.send({ type: "prompt", text: "/compact", images: [] });
-        else if (c === "mcp" && this.active()) this.openMcp(null);
+        else if (c === "mcp" && this.active() && this.claudeOnly()) this.openMcp(null);
         else if (c === "reload" && (this.findPane(), this.pane && focused()?.pane === this.pane)) this.reload();
         else if (c === "signin" && shared("herdr-chat:signin")?.key === this.key) this.signIn(shared("herdr-chat:signin").server);
         cx.notify();
@@ -151,6 +152,15 @@ export default class HerdrChat extends View {
 
   active() {
     return shared("herdr-chat:target") === this.key;
+  }
+
+  agent() {
+    return this.state.backend === "agy" ? "Antigravity" : "Claude";
+  }
+
+  // Antigravity chats run over ACP, which has no remote control, MCP management, rewind, fork or side chat.
+  claudeOnly() {
+    return this.state.backend !== "agy";
   }
 
   outputs() {
@@ -333,7 +343,7 @@ export default class HerdrChat extends View {
         const { url, token } = await endpoint(this.machine);
         this.ws = await WebSocket.connect(url);
         await this.ws.write(JSON.stringify({ type: "hello", v: PROTOCOL, token }));
-        await this.ws.write(JSON.stringify({ type: "open", key: this.key, cwd: this.cwd }));
+        await this.ws.write(JSON.stringify({ type: "open", key: this.key, cwd: this.cwd, ...(this.backend ? { backend: this.backend } : {}) }));
         if (this.viewing) this.send({ type: "view", on: true });
         this.conn = "connected";
         this.error = null;
@@ -427,7 +437,7 @@ export default class HerdrChat extends View {
     this.publish();
     this.publishPane();
     if (was && !next.busy && !this.visible()) {
-      notify({ title: "Claude finished", body: tilde(this.cwd, this.home), level: "success", action: this.focusAction() });
+      notify({ title: `${this.agent()} finished`, body: tilde(this.cwd, this.home), level: "success", action: this.focusAction() });
     }
   }
 
@@ -589,7 +599,7 @@ export default class HerdrChat extends View {
   alert(item) {
     if (this.visible()) return;
     const body = item.kind === "question" ? item.questions[0]?.question ?? "" : `${item.tool}${item.meta ? ` · ${item.meta}` : ""}`;
-    notify({ title: item.kind === "question" ? "Claude has a question" : "Claude needs permission", body, level: "warning", action: this.focusAction() });
+    notify({ title: item.kind === "question" ? `${this.agent()} has a question` : `${this.agent()} needs permission`, body, level: "warning", action: this.focusAction() });
   }
 
   pending() {
@@ -626,7 +636,9 @@ export default class HerdrChat extends View {
     const tok = this.slashToken();
     if (!tok || tok.start === this.dismissed) return [];
     const q = tok.q.toLowerCase();
-    const list = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp" && c.name !== "btw"), { name: "btw", description: "Ask on the side, in a read-only copy of this chat that doesn't interrupt it or end up in it (Cmd-;)", hint: "[question]" }, { name: "mcp", description: "Manage MCP servers", hint: "" }, { name: "restart-engine", description: "Restart a machine's chat engine, copying the code there first if it's remote (stops running turns)", hint: "[machine]" }, { name: "reload", description: "Reopen this chat in the same pane so it picks up new herdr-chat code", hint: "" }, { name: "move", description: "Move this chat to another machine: the conversation continues there and this pane closes", hint: "<machine> [folder] [--force]" }];
+    const all = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp" && c.name !== "btw"), { name: "btw", description: "Ask on the side, in a read-only copy of this chat that doesn't interrupt it or end up in it (Cmd-;)", hint: "[question]" }, { name: "mcp", description: "Manage MCP servers", hint: "" }, { name: "restart-engine", description: "Restart a machine's chat engine, copying the code there first if it's remote (stops running turns)", hint: "[machine]" }, { name: "reload", description: "Reopen this chat in the same pane so it picks up new herdr-chat code", hint: "" }, { name: "move", description: "Move this chat to another machine: the conversation continues there and this pane closes", hint: "<machine> [folder] [--force]" }];
+    const ours = ["btw", "mcp", "move"];
+    const list = this.claudeOnly() ? all : all.filter((c) => !ours.includes(c.name) || (this.state.commands ?? []).some((x) => x.name === c.name));
     const starts = list.filter((c) => c.name.toLowerCase().startsWith(q));
     const contains = list.filter((c) => !c.name.toLowerCase().startsWith(q) && (c.name + " " + c.description).toLowerCase().includes(q));
     return [...starts, ...contains].slice(0, 8);
@@ -649,6 +661,9 @@ export default class HerdrChat extends View {
 
   submit(cx, priority) {
     const text = this.input.value().trim();
+    if (!this.claudeOnly() && /^\/(mcp|move|btw)\b/.test(text) && !(this.state.commands ?? []).some((c) => text.startsWith(`/${c.name}`))) {
+      return notify({ title: `${text.split(/\s/)[0]} isn't available in Antigravity chats`, level: "warning" });
+    }
     if (text === "/mcp") {
       this.input.set_value("");
       return this.openMcp(cx);
@@ -882,7 +897,7 @@ export default class HerdrChat extends View {
 
   // A worktree can only be chosen before the session starts, in a git repo.
   canWorktree() {
-    return Boolean(this.branch) && !this.state.session && !this.state.busy && !this.items.length;
+    return this.claudeOnly() && Boolean(this.branch) && !this.state.session && !this.state.busy && !this.items.length;
   }
 
   toggleWorktree(cx) {
@@ -1049,7 +1064,7 @@ export default class HerdrChat extends View {
       .on_mouse_down("left", (_e, cx) => { s.pressed = true; cx.stop_propagation(); })
       .on_mouse_down_out((_e, cx) => { if (this.selection === s && s.pressed) { this.selection = null; cx.notify(); } })
       .child(btn("sel-quote", "Quote", "Quote this in your message, with a reply of its own", (cx) => this.addQuote(s.text, cx)))
-      .child(btn("sel-side", "Ask aside", "Ask about this in the side chat", (cx) => { this.selection = null; this.side.quote(s.text, cx); }));
+      .when(this.claudeOnly(), (el) => el.child(btn("sel-side", "Ask aside", "Ask about this in the side chat", (cx) => { this.selection = null; this.side.quote(s.text, cx); })));
   }
 
 

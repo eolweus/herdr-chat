@@ -28,7 +28,7 @@ function iconButton(id, icon, tip, t, onClick, on) {
 
 // Shown under the message the pointer is on; the row keeps its height so nothing jumps.
 function messageActions(item, t, view) {
-  const saved = UUID.test(item.id) && Boolean(view.state.session);
+  const saved = UUID.test(item.id) && Boolean(view.state.session) && view.claudeOnly();
   const idle = !view.state.busy && !view.pending();
   return h_flex().h(26).mt(4).gap(2).items_center().justify_end()
     .when(view.hoverUser === item.id, (el) => el
