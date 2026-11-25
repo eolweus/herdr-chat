@@ -31,6 +31,9 @@ type Pending = {
   tool?: string;
 };
 
+type Priority = "now" | "next" | "later";
+type Waiting = { id: string; text: string; images: Image[]; priority: Priority };
+
 const FLUSH_MS = 50;
 const IDLE_MS = 5 * 60_000, WARM_MS = 60_000;
 // Like the Claude app: a CLI per 3 GB of memory, at least 6; past it, starting one stops the longest-unused idle one.
@@ -125,7 +128,8 @@ export class Session {
   protected q: Query | null = null;
   protected box = inbox<SDKUserMessage>();
   protected pending = new Map<string, Pending>();
-  private queued: { id: string; text: string; images: Image[] }[] = [];
+  // Handed to the CLI while a turn ran, and not yet picked up by one.
+  private waiting = new Map<string, Waiting>();
   private holding: string[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
   private options: { permissionMode?: string; model?: string; effort?: string; flags?: Record<string, unknown> } = {};
@@ -196,7 +200,7 @@ export class Session {
 
   // What keeps a CLI running past the idle timer and the cap.
   held() {
-    return this.state.busy || this.pending.size > 0 || this.queued.length > 0 || this.wantRemote || this.state.tasks.length > 0 || this.viewers.size > 0;
+    return this.state.busy || this.pending.size > 0 || this.waiting.size > 0 || this.wantRemote || this.state.tasks.length > 0 || this.viewers.size > 0;
   }
 
   private stop() {
@@ -291,7 +295,7 @@ export class Session {
   }
 
   get activity(): "blocked" | "working" | "idle" {
-    return this.pending.size ? "blocked" : this.state.busy || this.queued.length ? "working" : "idle";
+    return this.pending.size ? "blocked" : this.state.busy || this.waiting.size ? "working" : "idle";
   }
 
   attach(c: Client) {
@@ -332,49 +336,54 @@ export class Session {
   }
 
   private changed() {
-    this.state.queue = this.queued.map((q) => ({ id: q.id, text: q.text, images: q.images.length }));
+    this.state.queue = [...this.waiting.values()].map((w) => ({ id: w.id, text: w.text, images: w.images.length, priority: w.priority }));
     this.n.stateDirty = true;
     this.schedule();
   }
 
-  prompt(text: string, images: Image[], id?: string) {
+  // While a turn runs, the CLI takes "next" in at its next tool result and holds "later" for a turn of its own.
+  prompt(text: string, images: Image[], id?: string, priority?: Priority) {
     const entry = { id: id && UUID.test(id) && !this.n.get(id) ? id : randomUUID(), text, images };
-    if (this.state.busy) this.queued.push(entry);
-    else this.send(entry);
+    if (!this.state.busy || !this.q) return this.send(entry);
+    this.hand({ ...entry, priority: priority === "later" ? "later" : "next" });
+  }
+
+  private hand(w: Waiting) {
+    this.waiting.set(w.id, w);
+    this.box.push(this.message(w, w.priority));
     this.changed();
   }
 
-  // Stops the running turn; the turn's result then sends the queue's front, which this one now is.
+  // "now" would also abort an open permission prompt, so that waits for the next tool result instead.
   async sendNow(id: string) {
-    const entry = this.queued.find((q) => q.id === id);
-    if (!entry) return;
-    this.queued = [entry, ...this.queued.filter((q) => q !== entry)];
-    this.changed();
-    if (!this.state.busy || !this.q) {
-      this.queued.shift();
-      this.send(entry);
-      return this.changed();
-    }
-    this.denyAll("Interrupted by the user");
-    await this.q.interrupt().catch(() => {});
+    const w = this.waiting.get(id);
+    if (!w || !this.q) return;
+    if (!(await (this.q as any).cancelAsyncMessage(id).catch(() => false))) return;
+    this.waiting.delete(id);
+    this.hand({ ...w, id: randomUUID(), priority: this.pending.size ? "next" : "now" });
   }
 
-  unqueue(id: string) {
-    this.queued = this.queued.filter((q) => q.id !== id);
+  async unqueue(id: string) {
+    if (!this.waiting.has(id) || !this.q) return;
+    if (await (this.q as any).cancelAsyncMessage(id).catch(() => false)) this.waiting.delete(id);
     this.changed();
   }
 
-  protected send({ id, text, images }: { id: string; text: string; images: Image[] }) {
-    this.lastUsed = Date.now();
-    this.n.upsert({ id, kind: "user", text, images });
-    this.n.setState({ busy: true });
+  private message({ id, text, images }: { id: string; text: string; images: Image[] }, priority?: Priority): SDKUserMessage {
     const said = this.preamble ? `${this.preamble}\n\n${text}` : text;
     if (this.preamble) { this.preamble = null; this.onSession(this); }
     const content = [
       ...images.map((i) => ({ type: "image" as const, source: { type: "base64" as const, media_type: i.type as "image/png", data: i.data } })),
       ...(said ? [{ type: "text" as const, text: said }] : []),
     ];
-    this.box.push({ type: "user", message: { role: "user", content }, parent_tool_use_id: null, uuid: id as `${string}-${string}-${string}-${string}-${string}` });
+    return { type: "user", message: { role: "user", content }, parent_tool_use_id: null, uuid: id as `${string}-${string}-${string}-${string}-${string}`, ...(priority && { priority }) };
+  }
+
+  protected send({ id, text, images }: { id: string; text: string; images: Image[] }) {
+    this.lastUsed = Date.now();
+    this.n.upsert({ id, kind: "user", text, images });
+    this.n.setState({ busy: true });
+    this.box.push(this.message({ id, text, images }));
     if (!this.q) this.start();
   }
 
@@ -413,9 +422,16 @@ export class Session {
         this.box.close();
         this.box = inbox();
         this.denyAll("Claude stopped");
+        const lost = [...this.waiting.values()];
+        this.waiting.clear();
         this.pid = null;
         this.n.setState({ busy: false, status: null, remote: null, tasks: [], memory: null });
-        this.schedule();
+        this.changed();
+        // They died with the CLI; a fresh one takes them in order.
+        if (lost.length && this.rested !== q) {
+          this.send(lost[0]!);
+          for (const w of lost.slice(1)) this.hand({ ...w, priority: "later" });
+        }
       }
     })();
   }
@@ -462,9 +478,10 @@ export class Session {
       this.linkPrs();
       this.lastUsed = Date.now();
       this.rest();
-      const next = this.queued.shift();
-      if (next) { this.send(next); this.changed(); }
+      // The CLI starts a turn for what's still waiting right away.
+      if (this.waiting.size) this.n.setState({ busy: true });
     }
+    if (msg.type === "command_lifecycle" && msg.state !== "queued" && this.waiting.delete(msg.command_uuid)) this.changed();
     this.schedule();
   }
 
@@ -679,10 +696,10 @@ export class Session {
   }
 
   async interrupt() {
-    this.queued = [];
+    this.waiting.clear();
     this.changed();
     this.denyAll("Interrupted by the user");
-    await this.q?.interrupt().catch(() => {});
+    await (this.q as any)?.interrupt({ cancelQueued: true }).catch(() => {});
   }
 
   // A copy of the conversation that ends just before message `id`, or null when that was the first message.
@@ -756,6 +773,7 @@ export class Session {
   }
 
   close() {
+    this.waiting.clear();
     this.closeSide();
     this.denyAll("Session closed");
     this.box.close();

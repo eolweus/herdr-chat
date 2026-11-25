@@ -157,7 +157,7 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
     return reopen(d, s, null, cwd);
   }
   switch (m.type) {
-    case "prompt": return s.prompt(String(m.text ?? ""), Array.isArray(m.images) ? m.images : [], typeof m.id === "string" ? m.id : undefined);
+    case "prompt": return s.prompt(String(m.text ?? ""), Array.isArray(m.images) ? m.images : [], typeof m.id === "string" ? m.id : undefined, m.priority === "later" ? "later" : undefined);
     case "unqueue": return s.unqueue(String(m.id));
     case "send_now": return s.sendNow(String(m.id));
     case "interrupt": return s.interrupt();

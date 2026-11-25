@@ -58,7 +58,7 @@ export type State = {
   mode: string;
   model: string;
   context: { used: number; max: number };
-  queue: { id: string; text: string; images: number }[];
+  queue: { id: string; text: string; images: number; priority: "now" | "next" | "later" }[];
   session: string | null;
   usage: Usage | null;
   commands: Command[];
