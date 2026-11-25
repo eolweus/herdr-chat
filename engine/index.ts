@@ -2,7 +2,6 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { dirname } from "node:path";
 import type { ServerWebSocket } from "bun";
-import { listSessions } from "@anthropic-ai/claude-agent-sdk";
 import { Session, userSettings, type Client, type Handoff } from "./src/session";
 import { ReplaySession } from "./src/replay";
 import { refreshLimits } from "./src/limits";
@@ -114,10 +113,7 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
   if (m.type === "older") return ws.send(JSON.stringify(s.older(String(m.before))));
   if (m.type === "image") return void s.image(String(m.item), Number(m.i)).then((r) => ws.send(JSON.stringify(r)));
   if (m.type === "sessions") {
-    const list = replay >= 0 ? [] : await listSessions({ dir: s.cwd, limit: 12 }).catch(() => []);
-    const sessions = list.filter((x) => x.sessionId !== s.state.session && !x.archived).map((x) => ({
-      id: x.sessionId, title: x.customTitle || x.summary || x.firstPrompt || "Untitled", when: x.lastModified, branch: x.gitBranch ?? null,
-    }));
+    const sessions = replay >= 0 ? [] : await s.list().catch(() => []);
     return ws.send(JSON.stringify({ type: "sessions", sessions }));
   }
   if (m.type === "resume") {

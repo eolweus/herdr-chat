@@ -53,6 +53,8 @@ export type ItemOf<K extends Item["kind"]> = Extract<Item, { kind: K }>;
 export type Task = { id: string; type: string; description: string };
 
 export type State = {
+  /** "claude" (Agent SDK) or "agy" (Antigravity over ACP). */
+  backend: string;
   busy: boolean;
   status: string | null;
   mode: string;

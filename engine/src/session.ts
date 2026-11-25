@@ -1,4 +1,4 @@
-import { forkSession, getSessionInfo, getSessionMessages, query, type Options, type PermissionResult, type PermissionUpdate, type Query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { forkSession, getSessionInfo, getSessionMessages, listSessions, query, type Options, type PermissionResult, type PermissionUpdate, type Query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { totalmem } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -133,12 +133,13 @@ export class Session {
   private holding: string[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
   private options: { permissionMode?: string; model?: string; effort?: string; flags?: Record<string, unknown> } = {};
-  private loaded = false;
+  protected loaded = false;
+  readonly backend: string = "claude";
   handoff: Handoff | null = null;
   // Told to Claude with the next message, e.g. that the session moved machines.
   preamble: string | null = null;
 
-  constructor(public key: string, public cwd: string, sessionId: string | null, private onSession: (s: Session) => void) {
+  constructor(public key: string, public cwd: string, sessionId: string | null, protected onSession: (s: Session) => void) {
     this.n = new Normalizer(cwd);
     this.n.state.session = sessionId;
     this.n.state.commands = knownCommands;
@@ -335,7 +336,7 @@ export class Session {
     }
   }
 
-  private changed() {
+  protected changed() {
     this.state.queue = [...this.waiting.values()].map((w) => ({ id: w.id, text: w.text, images: w.images.length, priority: w.priority }));
     this.n.stateDirty = true;
     this.schedule();
@@ -684,7 +685,7 @@ export class Session {
     this.schedule();
   }
 
-  private denyAll(message: string) {
+  protected denyAll(message: string) {
     for (const [id, p] of this.pending) {
       const item = this.n.get(id);
       if (item?.kind === "permission") item.state = "denied";
@@ -770,6 +771,13 @@ export class Session {
     this.side.close();
     this.side = null;
     this.broadcast({ type: "side_closed" });
+  }
+
+  async list(limit = 12) {
+    const list = await listSessions({ dir: this.cwd, limit }).catch(() => []);
+    return list.filter((x) => x.sessionId !== this.state.session && !x.archived).map((x) => ({
+      id: x.sessionId, title: x.customTitle || x.summary || x.firstPrompt || "Untitled", when: x.lastModified, branch: x.gitBranch ?? null,
+    }));
   }
 
   close() {
