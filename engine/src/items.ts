@@ -76,11 +76,15 @@ export type State = {
   outputs: Output[];
   /** Background shells and agents of the running process. */
   tasks: Task[];
+  /** GitHub PR links from gh pr commands in this chat. */
+  prs: string[];
+  repos: RepoChange[];
   /** The first message, a title until the session has one. */
   first: string | null;
 };
 
 export type Output = { path: string; name: string; created: boolean; add: number; del: number };
+export type RepoChange = { root: string; name: string; remote: string | null; add: number; del: number; files: number };
 
 export type Mcp = { name: string; label: string };
 export type McpServer = Mcp & {

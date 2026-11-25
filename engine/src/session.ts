@@ -6,6 +6,7 @@ import { Normalizer, commandsOf } from "./normalizer";
 import { beforeCompacts, savedImages } from "./history";
 import { describe } from "./tools";
 import { refreshLimits } from "./limits";
+import { prsOf, reposOf } from "./changes";
 
 export type Client = { send(o: unknown): void };
 
@@ -47,6 +48,12 @@ const PAGE_ITEMS = 80, PAGE_BYTES = 1_500_000;
 
 const EDITS = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
 const edited = (i: Item) => i.kind === "tool" && i.status === "ok" && Boolean(i.path) && EDITS.includes(i.name);
+
+const changesOf = (items: Item[]) => {
+  const outputs = outputsOf(items);
+  return { outputs, repos: reposOf(outputs), prs: prsOf(items) };
+};
+const ghPr = (i: Item | undefined) => i?.kind === "tool" && i.name === "Bash" && /\bgh\s+pr\b/.test(i.detail ?? "");
 
 function outputsOf(items: Item[]): Output[] {
   const files = new Map<string, Output>();
@@ -133,7 +140,7 @@ export class Session {
     try {
       const later = await getSessionMessages(id, { dir: this.cwd, includeSystemMessages: true });
       for (const m of [...await beforeCompacts(id, later).catch(() => []), ...later]) this.n.feed({ ...m, isReplay: true });
-      this.n.setState({ outputs: outputsOf(this.n.items), first: firstOf(this.n.items) });
+      this.n.setState({ ...changesOf(this.n.items), first: firstOf(this.n.items) });
       this.dropImages(this.n.items.map((i) => i.id));
       // Panes get these in the snapshot; sent as updates too, each would be drawn on its own.
       this.n.dirty.clear();
@@ -237,7 +244,7 @@ export class Session {
     const ids = [...this.n.dirty];
     this.n.dirty.clear();
     const changed = ids.map((id) => this.n.get(id));
-    if (changed.some((i) => i && edited(i))) this.n.setState({ outputs: outputsOf(this.n.items) });
+    if (changed.some((i) => i && (edited(i) || ghPr(i)))) this.n.setState(changesOf(this.n.items));
     if (!this.state.first && changed.some((i) => i?.kind === "user")) this.n.setState({ first: firstOf(this.n.items) });
     for (const id of ids) {
       const item = this.n.get(id);
