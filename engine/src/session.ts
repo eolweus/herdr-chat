@@ -9,6 +9,7 @@ import { describe } from "./tools";
 import { refreshLimits } from "./limits";
 import { prsOf, reposOf } from "./changes";
 import { memoryOf, type Proc, type Server } from "./memory";
+import { SideChat } from "./side";
 
 export type Client = { send(o: unknown): void };
 
@@ -237,7 +238,7 @@ export class Session {
   // Herdr's websocket drops messages over about 8 MB, and Read screenshots make long chats bigger than that.
   snapshot() {
     const { items, older } = this.page(this.n.items.length);
-    return { type: "snapshot", items, older, state: this.state, cwd: this.cwd, handoff: this.handoff };
+    return { type: "snapshot", items, older, state: this.state, cwd: this.cwd, handoff: this.handoff, side: this.side?.snapshot() ?? null };
   }
 
   page(end: number) {
@@ -293,6 +294,7 @@ export class Session {
 
   detach(c: Client) {
     this.clients.delete(c);
+    if (!this.clients.size) this.closeSide();
     if (this.viewers.delete(c) && !this.viewers.size) this.rest();
   }
 
@@ -727,7 +729,27 @@ export class Session {
     this.schedule();
   }
 
+  side: SideChat | null = null;
+
+  // A throwaway read-only fork for questions on the side; it's never saved, so nothing lists it.
+  askSide(text: string) {
+    if (!this.side) {
+      const session = this.state.session;
+      if (!session) throw new Error("Send a message in this chat first, so there's a conversation to fork");
+      this.side = new SideChat({ session, cwd: this.cwd, model: this.options.model ?? (this.state.model || undefined), effort: this.options.effort ?? this.state.effort ?? undefined }, (o) => this.broadcast(o));
+    }
+    this.side.ask(text);
+  }
+
+  closeSide() {
+    if (!this.side) return;
+    this.side.close();
+    this.side = null;
+    this.broadcast({ type: "side_closed" });
+  }
+
   close() {
+    this.closeSide();
     this.denyAll("Session closed");
     this.box.close();
     this.q?.close();
