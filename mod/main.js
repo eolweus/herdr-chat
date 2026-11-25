@@ -19,6 +19,7 @@ import { PROTOCOL, endpoint, openAuth } from "./engine.js";
 import { FileLinks, openFile } from "./filelinks.js";
 import { SidePanel } from "./side.js";
 import { bodyOf, splitQuotes, withQuotes } from "./quote.js";
+import { Find } from "./find.js";
 
 const DATA = "data/herdr-chat";
 const VIEW_MS = 800;
@@ -135,6 +136,7 @@ export default class HerdrChat extends View {
         else if (c === "compact" && this.active()) this.send({ type: "prompt", text: "/compact", images: [] });
         else if (c === "mcp" && this.active() && this.claudeOnly()) this.openMcp(null);
         else if (c === "reload" && (this.findPane(), this.pane && focused()?.pane === this.pane)) this.reload();
+        else if (c === "find" && (this.findPane(), this.pane && focused()?.pane === this.pane)) this.find.show(cx);
         else if (c === "signin" && shared("herdr-chat:signin")?.key === this.key) this.signIn(shared("herdr-chat:signin").server);
         cx.notify();
       }
@@ -1044,6 +1046,7 @@ export default class HerdrChat extends View {
   ensure(render = false) {
     this.quotes ??= [];
     this.origin ??= { x: 0, y: 0 };
+    this.find ??= new Find(this);
     if (render) return;
     this.side ??= new SidePanel(this);
   }
@@ -1167,6 +1170,19 @@ export default class HerdrChat extends View {
     this.contentH = h;
   }
 
+  // Scrolls a row near the top: a viewport-tall marker placed there is revealed exactly.
+  scrollToRow(id) {
+    const zoom = settings().zoom || 1;
+    let top = 10 + this.spacer;
+    for (const b of this.lastShown ?? []) {
+      if (b.id === id) break;
+      top += (this.heights.get(b.id) ?? 0) / zoom;
+    }
+    this.following = false;
+    this.stick = false;
+    this.findMark = { top: Math.max(0, top - 80), h: Math.max(100, (this.viewH ?? 600) / zoom), n: (this.findMark?.n ?? 0) + 1, ready: false, done: false };
+  }
+
   jump(cx) {
     this.following = true;
     this.stick = true;
@@ -1246,6 +1262,9 @@ export default class HerdrChat extends View {
     const staged = this.staged ? visible(this.staged) : null;
     const restore = this.restore;
     if (restore?.merged) this.scroll.scroll_to_item(2);
+    if (this.find.open) this.find.refresh();
+    const mark = restore ? null : this.findMark;
+    if (mark?.ready && !mark.done) { mark.done = true; this.scroll.scroll_to_item(2); }
     if (this.stick && shown.length && !restore) {
       this.scroll.scroll_to_item(1);
       this.stick = false;
@@ -1263,6 +1282,8 @@ export default class HerdrChat extends View {
           .on_size_change((size, cx) => this.commitOlder(size.height, cx))
           .children((staged ?? []).map((i) => this.renderItem(i, t, children).max_w(880))))))
       .child(div().h(8))
+      .when(Boolean(mark), (el) => el.child(div().id(`find-mark-${mark.n}`).absolute().top(mark.top).left(0).w(1).h(mark.h)
+        .on_size_change((_s, cx) => { if (!mark.ready) { mark.ready = true; cx.notify(); } })))
       // Revealing this marker scrolls by exactly the height the content above changed by.
       .when(Boolean(restore), (el) => el.child(div().id(`restore-${restore.n}`).absolute().top(restore.at - 1).left(0).w(1).h(1)
         .on_size_change((_s, cx) => this.mergeOlder(cx))));
@@ -1281,6 +1302,7 @@ export default class HerdrChat extends View {
         .when(Boolean(this.handoff), (el) => el.child(handoffStrip(this, t)))
         .child(shown.length ? div().relative().flex_1().min_h(0).flex().flex_col()
           .child(transcript)
+          .when(this.find.open, (el) => el.child(this.find.render(t)))
           .when(!this.following, (el) => el.child(div().absolute().bottom(10).w_full().flex().justify_center()
             .child(div().id("jump").px(12).py(5).rounded(14).bg(t.raised).border_1().border_color(t.border)
               .text_size(12).cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.jump(cx)).child("↓ Latest"))))

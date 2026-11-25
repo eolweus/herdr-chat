@@ -67,6 +67,7 @@ export function userRow(item, t, view) {
     .on_hover((hovered, cx) => view.hoverRow(item.id, hovered, cx))
     .child(
     v_flex().max_w(600).gap(8).px(14).py(10).rounded(16).bg(t.raised)
+      .when(view.find.open && view.find.current()?.id === item.id, (el) => el.border_2().border_color(t.accent))
       .when(item.images.length > 0, (el) => el.child(h_flex().gap(6).flex_wrap()
         .children(item.images.map((_, i) => {
           const path = view.imagePath(item.id, i);
@@ -82,7 +83,7 @@ export function userRow(item, t, view) {
 }
 
 export function textRow(item, t, view) {
-  return row().py(8).child(markdown(item.id, item.text || " ", t, view.codes, { onRun: (id, code, terminal, cx) => view.runCommand(id, code, terminal, cx), runs: view.runs, links: view.links, onLink: (href, cx) => view.openLink(href, cx), onSelect: (key, sel, cx) => view.selected(key, sel, cx) }));
+  return row().py(8).child(markdown(item.id, item.text || " ", t, view.codes, { onRun: (id, code, terminal, cx) => view.runCommand(id, code, terminal, cx), runs: view.runs, links: view.links, onLink: (href, cx) => view.openLink(href, cx), onSelect: (key, sel, cx) => view.selected(key, sel, cx), highlight: (key) => view.find.ranges(key, t) }));
 }
 
 export function thinkingRow(item, t, view) {
