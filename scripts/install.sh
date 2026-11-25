@@ -43,12 +43,15 @@ Description=herdr-chat engine
 ExecStart=/usr/bin/zsh -lc "$run"
 Restart=always
 RestartSec=2
+# Chats' claude and MCP processes run in here too; the engine starts fresh ones, so don't wait on them.
+KillMode=mixed
+TimeoutStopSec=5
 
 [Install]
 WantedBy=default.target
 EOF
   systemctl --user daemon-reload
-  systemctl --user enable --now herdr-chat.service >/dev/null
+  systemctl --user enable herdr-chat.service >/dev/null 2>&1
   systemctl --user restart herdr-chat.service
   echo "engine: systemd herdr-chat.service, log: journalctl --user -u herdr-chat"
 fi
