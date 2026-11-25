@@ -16,6 +16,8 @@ import { moveChat } from "./move.js";
 import { McpDialog } from "./mcp.js";
 import { PROTOCOL, endpoint, openAuth } from "./engine.js";
 import { FileLinks, openFile } from "./filelinks.js";
+import { SidePanel } from "./side.js";
+import { bodyOf, splitQuotes, withQuotes } from "./quote.js";
 
 const DATA = "data/herdr-chat";
 const VIEW_MS = 800;
@@ -81,6 +83,10 @@ export default class HerdrChat extends View {
     this.originals = new Set();
     this.runs = new Map();
     this.attachments = [];
+    this.quotes = [];
+    this.selection = null;
+    this.origin = { x: 0, y: 0 };
+    this.side = new SidePanel(this);
     this.following = true;
     this.stick = true;
     this.pane = null;
@@ -268,7 +274,8 @@ export default class HerdrChat extends View {
   publishPane() {
     if (!this.pane || this.other) return;
     const status = this.pending() ? "blocked" : this.state.busy ? "working" : this.unseen ? "done" : null;
-    const first = this.state.first ?? this.items.find((i) => i.kind === "user" && !isRunOutput(i) && !i.text?.startsWith("This session is being continued"))?.text?.split("\n")[0] ?? null;
+    const firstText = this.state.first ?? this.items.find((i) => i.kind === "user" && !isRunOutput(i) && !i.text?.startsWith("This session is being continued"))?.text;
+    const first = firstText && bodyOf(firstText).split("\n")[0];
     const title = this.handoff?.title ?? this.state.title ?? (first && first.slice(0, 80));
     this.nameTab(this.handoff?.title ?? this.state.title ?? first, first);
     const json = JSON.stringify({ folder: tilde(this.cwd, this.home), cwd: this.cwd, status, title, named: Boolean(this.state.title) });
@@ -352,6 +359,7 @@ export default class HerdrChat extends View {
   }
 
   async receive(m, cx) {
+    if (this.side.receive(m)) return;
     if (m.type === "hello" && m.v !== PROTOCOL) this.error = `engine speaks protocol ${m.v}, this pane ${PROTOCOL}`;
     else if (m.type === "error") { this.error = m.message; this.remotePending = false; this.publish(); }
     else if (m.type === "auth") await this.openAuth(m.server, m.url);
@@ -359,6 +367,7 @@ export default class HerdrChat extends View {
     else if (m.type === "snapshot") {
       if (m.cwd && m.cwd !== this.cwd) { this.cwd = m.cwd; this.branch = null; this.links = new FileLinks(); this.readFolder(cx); }
       this.handoff = m.handoff ?? null;
+      this.side.restore(m.side);
       this.items = [];
       this.byId.clear();
       this.staged = null;
@@ -614,7 +623,7 @@ export default class HerdrChat extends View {
     const tok = this.slashToken();
     if (!tok || tok.start === this.dismissed) return [];
     const q = tok.q.toLowerCase();
-    const list = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp"), { name: "mcp", description: "Manage MCP servers", hint: "" }, { name: "restart-engine", description: "Restart a machine's chat engine, copying the code there first if it's remote (stops running turns)", hint: "[machine]" }, { name: "reload", description: "Reopen this chat in the same pane so it picks up new herdr-chat code", hint: "" }, { name: "move", description: "Move this chat to another machine: the conversation continues there and this pane closes", hint: "<machine> [folder] [--force]" }];
+    const list = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp" && c.name !== "btw"), { name: "btw", description: "Ask on the side, in a read-only copy of this chat that doesn't interrupt it or end up in it (Cmd-;)", hint: "[question]" }, { name: "mcp", description: "Manage MCP servers", hint: "" }, { name: "restart-engine", description: "Restart a machine's chat engine, copying the code there first if it's remote (stops running turns)", hint: "[machine]" }, { name: "reload", description: "Reopen this chat in the same pane so it picks up new herdr-chat code", hint: "" }, { name: "move", description: "Move this chat to another machine: the conversation continues there and this pane closes", hint: "<machine> [folder] [--force]" }];
     const starts = list.filter((c) => c.name.toLowerCase().startsWith(q));
     const contains = list.filter((c) => !c.name.toLowerCase().startsWith(q) && (c.name + " " + c.description).toLowerCase().includes(q));
     return [...starts, ...contains].slice(0, 8);
@@ -654,13 +663,18 @@ export default class HerdrChat extends View {
       this.input.set_value("");
       return this.reload();
     }
+    const btw = text.match(/^\/btw(?:\s+([\s\S]*))?$/);
+    if (btw) {
+      this.input.set_value("");
+      return btw[1]?.trim() ? this.side.ask(btw[1], cx) : this.side.show(cx);
+    }
     const restart = text.match(/^\/restart-engine(?:\s+(\S+))?$/);
     if (restart) {
       this.input.set_value("");
       const m = restart[1];
       return this.restartEngine(m === undefined ? this.machine : ["mac", "local", "here"].includes(m) ? null : m, cx);
     }
-    if (!this.ws || (!text && !this.attachments.length)) return;
+    if (!this.ws || (!text && !this.attachments.length && !this.quotes.length)) return;
     const encoding = this.attachments.filter((a) => a.data === null);
     if (encoding.length) return void cx.spawn(async (cx) => { await Promise.all(encoding.map((a) => a.ready)); this.submit(cx); });
     const waiting = this.pending();
@@ -668,9 +682,10 @@ export default class HerdrChat extends View {
       if (waiting.kind === "permission") this.answer({ item: waiting.id, decision: "deny", message: text }, cx);
       else this.answer({ item: waiting.id, answers: null, message: `The user replied instead of picking: ${text}` }, cx);
     }
-    this.prompt(text, this.attachments.filter((a) => a.data).map(({ type, data }) => ({ type, data })));
+    this.prompt(withQuotes(this.quotes, text), this.attachments.filter((a) => a.data).map(({ type, data }) => ({ type, data })));
     this.input.set_value("");
     this.attachments = [];
+    this.quotes = [];
     cx.notify();
   }
 
@@ -818,7 +833,11 @@ export default class HerdrChat extends View {
     if (!c) return;
     this.confirm = null;
     this.send({ type: "rewind", id: c.id, files: Boolean(c.restore && c.files?.length) });
-    if (c.edit) this.setDraft(c.text);
+    if (c.edit) {
+      const { quotes, body } = splitQuotes(c.text);
+      this.quotes = quotes;
+      this.setDraft(body);
+    }
     cx.notify();
   }
 
@@ -960,6 +979,37 @@ export default class HerdrChat extends View {
     }
   }
 
+  addQuote(text, cx) {
+    if (!text?.trim()) return;
+    this.quotes.push(text.trim());
+    this.selection = null;
+    this.input.focus();
+    cx.notify();
+  }
+
+  removeQuote(i, cx) {
+    this.quotes.splice(i, 1);
+    cx.notify();
+  }
+
+  // A settled selection in a reply offers to quote it; a selection cleared elsewhere doesn't hide another's bar.
+  selected(key, sel, cx) {
+    if (sel?.text && sel.position) this.selection = { key, text: sel.text, x: sel.position.x - this.origin.x, y: sel.position.y - this.origin.y };
+    else if (this.selection?.key === key) this.selection = null;
+    else return;
+    cx.notify();
+  }
+
+  selectionBar(t) {
+    const s = this.selection;
+    const btn = (id, label, fn) => div().id(id).px(9).py(4).rounded(6).cursor_pointer().text_size(12).text_color(t.foreground)
+      .hover((st) => st.bg(t.hover)).on_click((_e, cx) => { cx.stop_propagation(); fn(cx); }).child(label);
+    const left = Math.max(8, Math.min(s.x - 90, (this.width ?? 0) - 260));
+    return h_flex().absolute().left(left).top(s.y + 10).p(3).gap(2).rounded(8).border_1().border_color(t.border).bg(t.surface).shadow_lg()
+      .child(btn("sel-quote", "Quote", (cx) => this.addQuote(s.text, cx)))
+      .child(btn("sel-side", "Ask in side chat", (cx) => { this.side.quote(s.text, cx); this.selection = null; }));
+  }
+
   removeAttachment(i, cx) {
     this.attachments.splice(i, 1);
     cx.notify();
@@ -978,6 +1028,8 @@ export default class HerdrChat extends View {
     else if (cmds.length && e.keystroke === "tab") this.complete(cmds[this.commandAt] ?? cmds[0], cx);
     else if (cmds.length && e.keystroke === "escape") { this.dismissed = this.slashToken()?.start ?? null; cx.notify(); }
     else if (this.modelMenu && e.keystroke === "escape") { this.modelMenu = false; cx.notify(); }
+    else if (e.keystroke === "cmd-;") this.side.toggle(cx);
+    else if (e.keystroke === "escape" && this.side.focused) { if (this.side.busy) this.side.interrupt(cx); else this.side.close(cx); }
     else if (e.keystroke === "escape" && this.state.busy) this.interrupt(cx);
     else if (e.keystroke === "shift-tab") this.cycleMode(cx);
     else return;
@@ -987,6 +1039,7 @@ export default class HerdrChat extends View {
   // GPUI doesn't report the scroll offset, so the distance from the bottom is tracked from wheel moves.
   wheel(e, cx) {
     this.wheeledAt = Date.now();
+    if (this.selection) { this.selection = null; cx.notify(); }
     const max = Math.max(0, (this.contentH ?? 0) + 18 - (this.viewH ?? 0));
     if (this.following) {
       if (e.delta.y <= 0 || !max) return;
@@ -1105,7 +1158,9 @@ export default class HerdrChat extends View {
       // Revealing this marker scrolls by exactly the height the content above changed by.
       .when(Boolean(restore), (el) => el.child(div().id(`restore-${restore.n}`).absolute().top(restore.at - 1).left(0).w(1).h(1)
         .on_size_change((_s, cx) => this.mergeOlder(cx))));
-    return v_flex().id("root").track_focus(this.handle).size_full().bg(t.background).text_color(t.foreground)
+    return h_flex().id("root").track_focus(this.handle).size_full().relative().bg(t.background).text_color(t.foreground)
+      .on_mouse_move((e) => { this.origin = { x: e.position.x - e.local_position.x, y: e.position.y - e.local_position.y }; })
+      .on_size_change((size) => { this.width = size.width; })
       .when(this.commandMatches().length > 0, (el) => el.key_context("HerdrChatCommands"))
       .on_action("herdr-chat-complete", (_e, cx) => { const cmds = this.commandMatches(); if (cmds.length) this.complete(cmds[this.commandAt] ?? cmds[0], cx); })
       .on_action("herdr-chat-up", (_e, cx) => this.moveCommand(-1, cx))
@@ -1113,14 +1168,17 @@ export default class HerdrChat extends View {
       .on_key_down((e, cx) => this.key(e, cx))
       .on_drop((e, cx) => cx.spawn(async (cx) => this.drop(e.paths, cx)))
       .on_click((_e, cx) => { this.findPane(); cx.notify(); })
-      .when(this.conn !== "connected", (el) => el.child(this.banner(t)))
-      .when(Boolean(this.handoff), (el) => el.child(handoffStrip(this, t)))
-      .child(shown.length ? div().relative().flex_1().min_h(0).flex().flex_col()
-        .child(transcript)
-        .when(!this.following, (el) => el.child(div().absolute().bottom(10).w_full().flex().justify_center()
-          .child(div().id("jump").px(12).py(5).rounded(14).bg(t.raised).border_1().border_color(t.border)
-            .text_size(12).cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.jump(cx)).child("↓ Latest"))))
-        : this.empty(t))
-      .child(h_flex().w_full().justify_center().flex_none().child(composer(this, t)));
+      .child(v_flex().flex_1().min_w(0).h_full()
+        .when(this.conn !== "connected", (el) => el.child(this.banner(t)))
+        .when(Boolean(this.handoff), (el) => el.child(handoffStrip(this, t)))
+        .child(shown.length ? div().relative().flex_1().min_h(0).flex().flex_col()
+          .child(transcript)
+          .when(!this.following, (el) => el.child(div().absolute().bottom(10).w_full().flex().justify_center()
+            .child(div().id("jump").px(12).py(5).rounded(14).bg(t.raised).border_1().border_color(t.border)
+              .text_size(12).cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.jump(cx)).child("↓ Latest"))))
+          : this.empty(t))
+        .child(h_flex().w_full().justify_center().flex_none().child(composer(this, t))))
+      .when(this.side.open, (el) => el.child(this.side.render(t)))
+      .when(Boolean(this.selection), (el) => el.child(this.selectionBar(t)));
   }
 }

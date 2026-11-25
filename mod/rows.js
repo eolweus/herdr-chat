@@ -1,6 +1,7 @@
 import { div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, Input } from "gpui-base";
 import { markdown, codeBlock, diffBlock } from "./markdown.js";
+import { quoteBlock, splitQuotes } from "./quote.js";
 
 const DIFF_TOOLS = ["Edit", "MultiEdit", "Write"];
 const QUIET_TOOLS = ["Edit", "MultiEdit", "Write", "Read", "NotebookEdit", "TodoWrite"];
@@ -35,6 +36,7 @@ function messageActions(item, t, view) {
       .when(saved && idle, (el) => el
         .child(iconButton(`rewind-${item.id}`, "rotate-ccw", "Rewind: remove this message and everything after it", t, (_e, cx) => view.askRewind(item, false, cx)))
         .child(iconButton(`edit-${item.id}`, "pencil", "Edit: rewind to before this message and put it back in the box", t, (_e, cx) => view.askRewind(item, true, cx))))
+      .when(Boolean(item.text), (el) => el.child(iconButton(`quoteu-${item.id}`, "text-quote", "Quote in your next message", t, (_e, cx) => view.addQuote(splitQuotes(item.text).body, cx))))
       .when(Boolean(item.text), (el) => el.child(iconButton(`copyu-${item.id}`, "copy", view.copied === item.id ? "Copied" : "Copy", t,
         (_e, cx) => view.copyText(item.id, item.text, cx), view.copied === item.id))));
 }
@@ -60,6 +62,7 @@ function rewindConfirm(c, t, view) {
 
 export function userRow(item, t, view) {
   const c = view.confirm?.id === item.id ? view.confirm : null;
+  const { quotes, body } = splitQuotes(item.text);
   return row().id(`user-${item.id}`).items_end().pt(10).pb(2)
     .on_hover((hovered, cx) => view.hoverRow(item.id, hovered, cx))
     .child(
@@ -73,12 +76,13 @@ export function userRow(item, t, view) {
               .on_click(() => view.viewImages(all, all.indexOf(path))).child(image(path).size_full())
             : div().w(160).h(100).rounded(8).bg(t.surface);
         }))))
-      .when(Boolean(item.text), (el) => el.child(div().text_size(14).child(item.text))))
+      .children(quotes.map((q) => quoteBlock(q, t)))
+      .when(Boolean(body), (el) => el.child(div().text_size(14).child(body))))
     .child(c ? rewindConfirm(c, t, view) : messageActions(item, t, view));
 }
 
 export function textRow(item, t, view) {
-  return row().py(8).child(markdown(item.id, item.text || " ", t, view.codes, { onRun: (id, code, terminal, cx) => view.runCommand(id, code, terminal, cx), runs: view.runs, links: view.links, onLink: (href, cx) => view.openLink(href, cx) }));
+  return row().py(8).child(markdown(item.id, item.text || " ", t, view.codes, { onRun: (id, code, terminal, cx) => view.runCommand(id, code, terminal, cx), runs: view.runs, links: view.links, onLink: (href, cx) => view.openLink(href, cx), onSelect: (key, sel, cx) => view.selected(key, sel, cx) }));
 }
 
 export function thinkingRow(item, t, view) {
@@ -147,7 +151,11 @@ export function endRow(item, t, view) {
   return row().pt(2).pb(12).child(h_flex().gap(10).items_center().text_size(11.5)
     .child(div().text_color(item.error ? t.blocked : t.dim).child(item.error ? `Stopped: ${item.error}` : `Done in ${seconds(item.ms)}`))
     .when(Boolean(view.replyFor(item.id)), (el) => el.child(div().id(`copy-${item.id}`).text_color(copied ? t.done : t.dim).cursor_pointer()
-      .hover((s) => s.text_color(t.foreground)).on_click((_e, cx) => view.copyReply(item.id, cx)).child(copied ? "Copied" : "Copy"))))
+      .hover((s) => s.text_color(t.foreground)).on_click((_e, cx) => view.copyReply(item.id, cx)).child(copied ? "Copied" : "Copy"))
+      .child(div().id(`quote-${item.id}`).text_color(t.dim).cursor_pointer().hover((s) => s.text_color(t.foreground))
+        .tooltip("Quote this reply in your next message").on_click((_e, cx) => view.addQuote(view.replyFor(item.id), cx)).child("Quote"))
+      .child(div().id(`aside-${item.id}`).text_color(t.dim).cursor_pointer().hover((s) => s.text_color(t.foreground))
+        .tooltip("Ask about this reply in a side chat").on_click((_e, cx) => view.side.quote(view.replyFor(item.id), cx)).child("Ask on the side"))))
     .children(view.authFor(item.id).map((m) => signInRow(m, t, view)));
 }
 

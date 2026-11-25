@@ -1,6 +1,7 @@
 import { div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, Textarea, Popover } from "gpui-base";
 import { shared } from "herdr";
+import { bodyOf, quoteChips } from "./quote.js";
 
 // Run output goes to Claude as a message, but it already shows under its block, so the chat hides it.
 export const RUN_TAG = "<!-- herdr-chat:run -->";
@@ -56,7 +57,7 @@ export function composer(view, t) {
     .when(s.queue.length > 0, (el) => el.child(v_flex().gap(4).px(4).children(s.queue.map((q) =>
       h_flex().gap(8).px(10).py(5).rounded(8).bg(t.raised).items_center().text_size(12.5)
         .child(div().text_color(t.dim).child("Queued"))
-        .child(div().flex_1().min_w(0).truncate().child(isRunOutput({ kind: "user", text: q.text }) ? "Command output" : q.text || `${q.images} image${q.images === 1 ? "" : "s"}`))
+        .child(div().flex_1().min_w(0).truncate().child(isRunOutput({ kind: "user", text: q.text }) ? "Command output" : bodyOf(q.text) || `${q.images} image${q.images === 1 ? "" : "s"}`))
         .child(div().id(`now-${q.id}`).flex_none().px(8).py(1).rounded(6).border_1().border_color(t.border).bg(t.surface)
           .cursor_pointer().text_size(11.5).text_color(t.foreground).hover((s) => s.bg(t.hover)).tooltip("Stop Claude and send this now")
           .on_click((_e, cx) => view.sendNow(q.id, cx)).child("Send now"))
@@ -64,6 +65,7 @@ export function composer(view, t) {
           .on_click((_e, cx) => view.unqueue(q.id, cx)).child("✕"))))))
     .when(view.commandMatches().length > 0, (el) => el.child(commandList(view, t)))
     .child(v_flex().w_full().rounded(14).border_1().border_color(machineColor(view.machine) ?? (view.focusedInput ? t.accent : t.input)).bg(t.surface)
+      .when(view.quotes.length > 0, (el) => el.child(quoteChips(view.quotes, t, "quote", (i, cx) => view.removeQuote(i, cx))))
       .when(view.attachments.length > 0, (el) => el.child(h_flex().gap(8).px(10).pt(10).flex_wrap()
         .children(view.attachments.map((a, i) => div().relative()
           .child(div().id(`att-${i}`).cursor_pointer().hover((s) => s.opacity(0.85))

@@ -111,11 +111,12 @@ export function codeBlock(state, code, t, { label, maxLines = 40, onRun, runs, i
     .when(Boolean(r), (el) => el.child(runOutput(r, t, id, (cx) => onRun(id, null, false, cx))));
 }
 
-export function markdown(id, text, t, codes, { size = 14, onRun, runs, links, onLink } = {}) {
+export function markdown(id, text, t, codes, { size = 14, onRun, runs, links, onLink, onSelect } = {}) {
   const parts = split(text);
   return v_flex().w_full().gap(10).children(parts.map((p, i) => {
     if (p.kind === "md") return TextView.markdown(`${id}:${i}`, links ? links.linkify(p.text) : p.text).selectable(true).text_size(size).w_full()
-      .map((el) => onLink ? el.on_link_click(onLink) : el);
+      .map((el) => onLink ? el.on_link_click(onLink) : el)
+      .map((el) => onSelect ? el.on_selection_change((sel, cx) => onSelect(`${id}:${i}`, sel, cx)) : el);
     const state = p.open ? null : codes.peek(`${id}:${i}`);
     if (!state) return TextView.markdown(`${id}:${i}`, "```" + p.lang + "\n" + p.code + "\n```").selectable(true).text_size(size).w_full();
     return codeBlock(state, p.code, t, { label: p.lang, maxLines: 400, onRun, runs, id: `${id}-${i}` });
