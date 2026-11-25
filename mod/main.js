@@ -67,7 +67,6 @@ export default class HerdrChat extends View {
     this.mono = settings().font_family;
     this.modelMenu = Boolean(p.models);
     this.modelSub = typeof p.models === "string" ? p.models : null;
-    this.remoteMenu = Boolean(p.remote);
     this.remotePending = false;
     this.picks = new Map();
     this.qPage = new Map();
@@ -118,6 +117,7 @@ export default class HerdrChat extends View {
         const c = await nextCommand();
         if (c === "focus" && (!this.pane || this.visible())) this.input.focus();
         else if (c === "edit" && this.pane && focused()?.pane === this.pane) this.editDraft(cx).catch((e) => { this.editor = null; notify({ title: "Couldn't open the editor", body: String(e?.message ?? e), level: "error" }); });
+        else if (c === "remote" && this.active()) this.setRemote(!this.state.remote, cx);
         else if (c === "compact" && this.active()) this.send({ type: "prompt", text: "/compact", images: [] });
         else if (c === "mcp" && this.active()) this.openMcp(null);
         else if (c === "signin" && shared("herdr-chat:signin")?.key === this.key) this.signIn(shared("herdr-chat:signin").server);
@@ -152,7 +152,7 @@ export default class HerdrChat extends View {
     const s = this.state;
     const data = {
       key: this.key, pane: this.pane, machine: this.machine, folder: tilde(this.cwd, this.home), branch: this.branch ?? null,
-      model: s.model, mode: s.mode, usage: s.usage ?? null, context: s.context, outputs: this.outputs(), mcp: s.mcp ?? [], remote: s.remote ?? null, title: s.title ?? null,
+      model: s.model, mode: s.mode, usage: s.usage ?? null, context: s.context, outputs: this.outputs(), mcp: s.mcp ?? [], remote: s.remote ?? null, remotePending: this.remotePending, title: s.title ?? null,
     };
     const json = JSON.stringify(data);
     if (json === this.published && shared(`herdr-chat:info:${this.pane}`)) return;
@@ -337,7 +337,7 @@ export default class HerdrChat extends View {
 
   async receive(m, cx) {
     if (m.type === "hello" && m.v !== PROTOCOL) this.error = `engine speaks protocol ${m.v}, this pane ${PROTOCOL}`;
-    else if (m.type === "error") { this.error = m.message; this.remotePending = false; }
+    else if (m.type === "error") { this.error = m.message; this.remotePending = false; this.publish(); }
     else if (m.type === "auth") await this.openAuth(m.server, m.url);
     else if (m.type === "state") this.setState(m.state);
     else if (m.type === "snapshot") {
@@ -758,15 +758,10 @@ export default class HerdrChat extends View {
     cx.notify();
   }
 
-  toggleRemoteMenu(cx) {
-    this.remoteMenu = !this.remoteMenu;
-    this.modelMenu = false;
-    cx.notify();
-  }
-
   setRemote(on, cx) {
     this.remotePending = true;
     this.send({ type: "remote", enabled: on });
+    this.publish();
     cx.notify();
   }
 
@@ -949,7 +944,6 @@ export default class HerdrChat extends View {
     } else if (cmds.length && e.keystroke === "tab") this.complete(cmds[this.commandAt] ?? cmds[0], cx);
     else if (cmds.length && e.keystroke === "escape") { this.dismissed = this.slashToken()?.start ?? null; cx.notify(); }
     else if (this.modelMenu && e.keystroke === "escape") { this.modelMenu = false; cx.notify(); }
-    else if (this.remoteMenu && e.keystroke === "escape") { this.remoteMenu = false; cx.notify(); }
     else if (e.keystroke === "escape" && this.state.busy) this.interrupt(cx);
     else if (e.keystroke === "shift-tab") this.cycleMode(cx);
     else return;

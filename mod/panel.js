@@ -55,6 +55,12 @@ export class Panel {
       .child(svg(`mods/herdr-chat/icons/${icon}.svg`).size(15).flex_none().text_color(t.dim))
       .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(text))
       .when(Boolean(extra), (el) => el.child(extra));
+    const link = (id, label, fn) => div().id(id).flex_none().text_size(11.5).text_color(t.accent).cursor_pointer()
+      .hover((s) => s.opacity(0.8)).on_click(fn).child(label);
+    const toggle = (id, on, pending) => div().id(id).flex_none().w(28).h(16).p(2).rounded(8).flex().items_center()
+      .when(on, (el) => el.justify_end()).bg(on ? t.accent : t.raised).border_1().border_color(on ? t.accent : t.border)
+      .when(Boolean(pending), (el) => el.opacity(0.6))
+      .child(div().size(10).rounded(5).bg(on ? t.solid_foreground : t.dim));
     const root = v_flex().id("chat-panel").size_full().bg(t.background).text_color(t.foreground).overflow_y_scrollbar();
     if (!a) return root.child(v_flex().size_full().items_center().justify_center().gap(6).p(16)
       .child(svg("icons/claude.svg").size(22).text_color(t.dim))
@@ -67,8 +73,13 @@ export class Panel {
         machineColor(a.machine) ? div().size(8).rounded(4).bg(machineColor(a.machine)) : null))
       .child(row("folder", a.folder ?? "No folder"))
       .when(Boolean(a.branch), (el) => el.child(row("git-branch", a.branch)))
-      .when(Boolean(a.remote), (el) => el.child(row("monitor", "Remote Control on", div().id("remote-link").text_size(11.5).text_color(t.accent)
-        .cursor_pointer().on_click(() => exec("open", [a.remote])).child("Open"))))
+      .when(Boolean(a.terminal && a.remote), (el) => el.child(row("smartphone", "Remote Control on", link("remote-link", "Open", () => exec("open", [a.remote])))))
+      .when(!a.terminal, (el) => el.child(h_flex().id("remote-row").cursor_pointer().on_click(() => target("herdr-chat.remote"))
+        .tooltip(a.remote ? "Open on claude.ai/code and in the Claude app on your phone" : "Continue this chat from claude.ai/code or your phone")
+        .child(row("smartphone", a.remotePending ? "Connecting…" : "Remote Control", toggle("remote-toggle", Boolean(a.remote), a.remotePending)).flex_1())))
+      .when(!a.terminal && Boolean(a.remote), (el) => el.child(h_flex().gap(10).pl(25).text_size(11.5)
+        .child(link("remote-open", "Open in browser", () => exec("open", [a.remote])))
+        .child(link("remote-copy", "Copy link", (_e, cx) => cx.write_to_clipboard(a.remote)))))
       .when(Boolean(a.model), (el) => el.child(row("file-text", a.model, div().text_size(11.5).text_color(t.dim).child(a.mode ?? ""))));
 
     const u = a.usage;
