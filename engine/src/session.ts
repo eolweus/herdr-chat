@@ -38,6 +38,8 @@ const label = (name: string) => name.split(":").pop()!.replace(/^claude\.ai /, "
 
 let knownCommands: State["commands"] = [];
 let knownModels: State["models"] = [];
+// One CLI fetches the models for every chat; after an engine restart they all load at once.
+let fetchingModels = false;
 
 export function userSettings(): Record<string, any> {
   try {
@@ -140,7 +142,7 @@ export class Session {
     this.loaded = true;
     const id = this.state.session;
     if (!id) {
-      if (!knownModels.length) this.warm();
+      if (this.needsModels()) this.warm();
       return;
     }
     this.title();
@@ -155,7 +157,7 @@ export class Session {
     } catch (e) {
       this.n.notice("error", `Couldn't load the earlier conversation: ${e}`);
     }
-    if (!knownModels.length || this.viewers.size) this.warm();
+    if (this.needsModels() || this.viewers.size) this.warm();
   }
 
   // A reopened session (after an engine restart, say) would otherwise wait for its next message to start
@@ -164,6 +166,7 @@ export class Session {
     if (this.q) return;
     this.start();
     await this.loadCommands();
+    fetchingModels = false;
     await this.usage();
     await this.mcp();
     this.rest(WARM_MS);
@@ -190,6 +193,12 @@ export class Session {
     if (!this.q) return;
     this.rested = this.q;
     this.q.close();
+  }
+
+  private needsModels() {
+    if (knownModels.length || fetchingModels) return false;
+    fetchingModels = true;
+    return true;
   }
 
   lastUsed = Date.now();
