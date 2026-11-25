@@ -1,5 +1,6 @@
 import { forkSession, getSessionInfo, getSessionMessages, query, type Options, type PermissionResult, type PermissionUpdate, type Query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
+import { totalmem } from "node:os";
 import { randomUUID } from "node:crypto";
 import type { Image, Item, McpServer, McpTool, Output, State } from "./items";
 import { Normalizer, commandsOf } from "./normalizer";
@@ -29,6 +30,10 @@ type Pending = {
 
 const FLUSH_MS = 50;
 const IDLE_MS = 5 * 60_000, WARM_MS = 60_000;
+// Like the Claude app: a CLI per 3 GB of memory, at least 6; past it, starting one stops the longest-unused idle one.
+const CAP = Number(process.env.HERDR_CHAT_CAP) || Math.max(6, Math.floor(totalmem() / 3 / 1024 ** 3));
+const EVICT_IDLE_MS = 60_000;
+const running = new Set<Session>();
 const label = (name: string) => name.split(":").pop()!.replace(/^claude\.ai /, "");
 
 let knownCommands: State["commands"] = [];
@@ -150,7 +155,7 @@ export class Session {
     } catch (e) {
       this.n.notice("error", `Couldn't load the earlier conversation: ${e}`);
     }
-    this.warm();
+    if (!knownModels.length || this.viewers.size) this.warm();
   }
 
   // A reopened session (after an engine restart, say) would otherwise wait for its next message to start
@@ -172,10 +177,40 @@ export class Session {
     if (this.resting) clearTimeout(this.resting);
     this.resting = setTimeout(() => {
       this.resting = null;
-      if (!this.q || this.state.busy || this.pending.size || this.queued.length || this.wantRemote || this.state.tasks.length) return;
-      this.rested = this.q;
-      this.q.close();
+      if (!this.held()) this.stop();
     }, ms);
+  }
+
+  // What keeps a CLI running past the idle timer and the cap.
+  held() {
+    return this.state.busy || this.pending.size > 0 || this.queued.length > 0 || this.wantRemote || this.state.tasks.length > 0 || this.viewers.size > 0;
+  }
+
+  private stop() {
+    if (!this.q) return;
+    this.rested = this.q;
+    this.q.close();
+  }
+
+  lastUsed = Date.now();
+  private viewers = new Set<Client>();
+
+  view(c: Client, on: boolean) {
+    this.lastUsed = Date.now();
+    if (on === this.viewers.has(c)) return;
+    if (on) this.viewers.add(c);
+    else this.viewers.delete(c);
+    if (on && !this.q && this.loaded) this.warm();
+    if (!this.viewers.size) this.rest();
+  }
+
+  private makeRoom() {
+    if (running.size < CAP) return;
+    const idle = [...running].filter((s) => s !== this && !s.held() && Date.now() - s.lastUsed >= EVICT_IDLE_MS);
+    const victim = idle.sort((a, b) => a.lastUsed - b.lastUsed)[0];
+    if (!victim) return;
+    console.log(`${running.size} CLIs running (cap ${CAP}); stopping ${victim.key}, unused for ${Math.round((Date.now() - victim.lastUsed) / 1000)}s`);
+    victim.stop();
   }
 
   // summary falls back to the latest prompt, and a long transcript's name can be beyond the SDK's read, so keep the last name.
@@ -247,6 +282,7 @@ export class Session {
 
   detach(c: Client) {
     this.clients.delete(c);
+    if (this.viewers.delete(c) && !this.viewers.size) this.rest();
   }
 
   protected broadcast(o: unknown) {
@@ -309,6 +345,7 @@ export class Session {
   }
 
   protected send({ id, text, images }: { id: string; text: string; images: Image[] }) {
+    this.lastUsed = Date.now();
     this.n.upsert({ id, kind: "user", text, images });
     this.n.setState({ busy: true });
     const said = this.preamble ? `${this.preamble}\n\n${text}` : text;
@@ -322,6 +359,8 @@ export class Session {
   }
 
   protected start() {
+    this.makeRoom();
+    running.add(this);
     const q = query({
       prompt: this.box.iter,
       options: {
@@ -350,7 +389,7 @@ export class Session {
       } catch (e) {
         if (this.rested !== q) this.n.notice("error", String(e instanceof Error ? e.message : e));
       } finally {
-        if (this.q === q) this.q = null;
+        if (this.q === q) { this.q = null; running.delete(this); }
         this.box.close();
         this.box = inbox();
         this.denyAll("Claude stopped");
@@ -401,6 +440,7 @@ export class Session {
       this.title();
       setTimeout(() => this.title(), 8000);
       this.linkPrs();
+      this.lastUsed = Date.now();
       this.rest();
       const next = this.queued.shift();
       if (next) { this.send(next); this.changed(); }

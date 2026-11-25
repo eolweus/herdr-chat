@@ -161,6 +161,7 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
     case "unqueue": return s.unqueue(String(m.id));
     case "send_now": return s.sendNow(String(m.id));
     case "interrupt": return s.interrupt();
+    case "view": return s.view(d.client, Boolean(m.on));
     case "answer": return s.answer(m as any);
     case "set": return s.set(m);
     case "mcp_auth": {
