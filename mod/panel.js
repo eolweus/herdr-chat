@@ -5,6 +5,8 @@ import { openFile } from "./filelinks.js";
 import { TerminalSession } from "./terminal.js";
 import { machineColor } from "./composer.js";
 
+const DOCS = /\.(md|markdown|html?|pdf)$/i;
+
 const fmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1)}k` : String(n));
 
 const COLORS = { messages: "ansi4", mcp_tools: "ansi1", system_tools: "ansi2", skills: "ansi3", custom_agents: "ansi5", memory_files: "ansi6" };
@@ -107,15 +109,19 @@ export class Panel {
         .child(div().id("compact").px(10).py(4).rounded(7).bg(t.raised).border_1().border_color(t.border).text_size(12)
           .cursor_pointer().hover((s) => s.bg(t.hover)).on_click(compact).child("Compact session")));
 
-    const outputs = section("Outputs")
-      .when(!a.outputs?.length, (el) => el.child(div().text_size(12).text_color(t.dim).child("Files Claude creates or edits show up here.")))
-      .children((a.outputs ?? []).map((o, i) => h_flex().id(`out-${i}`).gap(10).items_center().min_w(0).text_size(12.5).py(2).rounded(6)
+    const file = (o, i, prefix) => h_flex().id(`${prefix}-${i}`).gap(10).items_center().min_w(0).text_size(12.5).py(2).rounded(6)
         .cursor_pointer().hover((s) => s.bg(t.hover))
         .on_click((_e, cx) => openFile(cx, o.path, a.machine ?? null))
         .child(svg(`mods/herdr-chat/icons/${o.created ? "file" : "square-pen"}.svg`).size(14).flex_none().text_color(t.dim))
         .child(div().flex_1().min_w(0).truncate().child(o.name))
         .when(o.add > 0, (el) => el.child(div().text_size(11.5).text_color(t.ansi2).child(`+${o.add}`)))
-        .when(o.del > 0, (el) => el.child(div().text_size(11.5).text_color(t.ansi1).child(`-${o.del}`)))));
+        .when(o.del > 0, (el) => el.child(div().text_size(11.5).text_color(t.ansi1).child(`-${o.del}`)));
+    const docs = (a.outputs ?? []).filter((o) => DOCS.test(o.path));
+    const outputs = section("Outputs")
+      .when(!docs.length, (el) => el.child(div().text_size(12).text_color(t.dim).child("Documents, pages and PDFs Claude writes show up here.")))
+      .children(docs.map((o, i) => file(o, i, "out")));
+    const changes = a.outputs?.length ? section("Changes").children(a.outputs.map((o, i) => file(o, i, "change"))) : null;
+    const tasks = a.tasks?.length ? section("Running tasks").children(a.tasks.map((k) => row(k.type.includes("agent") ? "bot" : "terminal", k.description || k.type))) : null;
 
     const mcp = a.mcp?.length ? section("Needs sign-in").children(a.mcp.map((m) => h_flex().gap(10).items_center().min_w(0).text_size(12.5)
       .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(m.label))
@@ -131,6 +137,7 @@ export class Panel {
         .child(td.status === "completed" ? "✓" : td.status === "in_progress" ? "◐" : "○"))
       .child(div().flex_1().text_color(td.status === "completed" ? t.dim : t.foreground).child(td.content)))) : null;
 
-    return root.child(env).when(Boolean(todos), (el) => el.child(todos)).child(ctx).child(outputs).when(Boolean(mcp), (el) => el.child(mcp));
+    return root.child(env).when(Boolean(todos), (el) => el.child(todos)).child(ctx).child(outputs).when(Boolean(mcp), (el) => el.child(mcp))
+      .when(Boolean(changes), (el) => el.child(changes)).when(Boolean(tasks), (el) => el.child(tasks));
   }
 }
