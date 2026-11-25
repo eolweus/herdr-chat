@@ -11,7 +11,7 @@ export function commandsOf(list: Msg[] | undefined) {
 }
 
 export function newState(): State {
-  return { backend: "claude", busy: false, status: null, mode: "default", model: "", context: { used: 0, max: 0 }, queue: [], session: null, usage: null, commands: [], models: [], mcp: [], remote: null, title: null, effort: null, worktree: false, ultracode: false, fast: false, outputs: [], tasks: [], prs: [], repos: [], first: null, memory: null };
+  return { backend: "claude", busy: false, status: null, mode: "default", model: "", context: { used: 0, max: 0 }, queue: [], session: null, usage: null, commands: [], models: [], modes: null, mcp: [], remote: null, title: null, effort: null, worktree: false, ultracode: false, fast: false, outputs: [], tasks: [], prs: [], repos: [], first: null, memory: null };
 }
 
 function textOf(content: unknown): string {

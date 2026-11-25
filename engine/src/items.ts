@@ -65,6 +65,8 @@ export type State = {
   usage: Usage | null;
   commands: Command[];
   models: Model[];
+  /** The agent's permission modes, by Claude Code's names; null: Claude's own list. */
+  modes: { value: string; description: string }[] | null;
   mcp: Mcp[];
   remote: string | null;
   title: string | null;

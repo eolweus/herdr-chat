@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Image, McpServer, McpTool } from "./items";
 import { AcpClient } from "./acp";
-import { AcpFeed, MODES, asClaudeTool, modelsOf } from "./acp-feed";
+import { AcpFeed, MODES, asClaudeTool, modeOf, modelsOf } from "./acp-feed";
 import { AGY, agyCache as cache, agyCached as cached, agyModels, claudeModels, refreshGemini } from "./agy-cache";
 import { Session, type Answer, type Client } from "./session";
 import { describe } from "./tools";
@@ -11,6 +11,8 @@ type Entry = { id: string; text: string; images: Image[] };
 
 const IDLE_MS = 5 * 60_000;
 const NO = (what: string) => new Error(`${what} isn't available for Antigravity chats`);
+// What agy offered before it was asked, in case nothing is cached yet.
+const AGY_MODES = ["auto", "default", "acceptEdits", "plan"].map((value) => ({ value, description: "" }));
 const REMOTE_URL = "https://antigravity.google.com";
 
 // agy's remote control is one daemon per machine, not a switch per chat.
@@ -44,7 +46,7 @@ export class AcpSession extends Session {
     this.sid = sessionId;
     this.feed = new AcpFeed(this.n, randomUUID().slice(0, 8), claudeModels);
     const c = cached();
-    Object.assign(this.n.state, { backend: "agy", mode: "default", effort: c.effort ?? null, model: c.model ?? "", models: [...agyModels(), ...claudeModels()], commands: c.commands ?? [] });
+    Object.assign(this.n.state, { backend: "agy", mode: "default", effort: c.effort ?? null, model: c.model ?? "", models: [...agyModels(), ...claudeModels()], modes: c.modes ?? AGY_MODES, commands: c.commands ?? [] });
     daemonRunning().then((on) => { if (on) { this.n.setState({ remote: REMOTE_URL }); this.schedule(); } });
   }
 
@@ -102,9 +104,11 @@ export class AcpSession extends Session {
 
   private applyOptions(r: Msg) {
     if (r.configOptions) this.feed.config(r.configOptions);
-    if (r.modes?.currentModeId && !this.wantMode) this.n.setState({ mode: this.state.mode === "bypassPermissions" ? "bypassPermissions" : (Object.entries(MODES).find(([, v]) => v === r.modes.currentModeId)?.[0] ?? r.modes.currentModeId) });
+    if (r.modes?.currentModeId && !this.wantMode) this.n.setState({ mode: modeOf(r.modes.currentModeId) });
     const { models } = modelsOf(r.configOptions ?? []);
     if (models.length) cache({ models });
+    const modes = (r.modes?.availableModes ?? []).map((m: Msg) => ({ value: modeOf(m.id), description: m.description ?? "" }));
+    if (modes.length) { this.n.setState({ modes }); cache({ modes }); }
   }
 
   private exited(c: AcpClient) {
@@ -131,7 +135,6 @@ export class AcpSession extends Session {
     if (method !== "session/request_permission") throw new Error(`${method} isn't supported`);
     const options: Msg[] = p.options ?? [];
     const pick = (...kinds: string[]) => kinds.map((k) => options.find((o) => o.kind === k)).find(Boolean)?.optionId;
-    if (this.state.mode === "bypassPermissions") return { outcome: { outcome: "selected", optionId: pick("allow_once", "allow_always") } };
     const call: Msg = p.toolCall ?? {};
     const toolId = call.toolCallId ?? randomUUID();
     const { name, input } = asClaudeTool(call);

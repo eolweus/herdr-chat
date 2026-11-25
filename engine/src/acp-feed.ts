@@ -8,7 +8,7 @@ const RESULT_LIMIT = 4000;
 const HIDDEN = new Set(["ask_question"]);
 
 // Antigravity's mode names, keyed by the Claude Code names the pane uses.
-export const MODES: Record<string, string> = { default: "default", acceptEdits: "accept-edits", plan: "plan", auto: "auto", bypassPermissions: "auto" };
+export const MODES: Record<string, string> = { default: "default", acceptEdits: "accept-edits", plan: "plan", auto: "auto" };
 export const modeOf = (agy: string) => Object.entries(MODES).find(([, v]) => v === agy)?.[0] ?? agy;
 
 const STATUS: Record<string, ToolStatus> = { pending: "running", in_progress: "running", completed: "ok", failed: "error" };
