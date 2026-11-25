@@ -419,7 +419,7 @@ export default class HerdrChat extends View {
       this.setState(m.state);
       this.stick = true;
       this.recent = null;
-      if (!this.items.length && this.resumeId) { this.send({ type: "resume", id: this.resumeId }); this.resumeId = null; }
+      if (!this.items.length && this.resumeId) { this.send({ type: "resume", id: this.resumeId, ...(this.backend ? { backend: this.backend } : {}) }); this.resumeId = null; }
       else if (!this.items.length) this.send({ type: "sessions" });
     } else if (m.type === "older") {
       this.loadingOlder = false;
