@@ -17,10 +17,12 @@ const ownModels = (s) => (s.models ?? []).filter((m) => agentOf(m) === (s.backen
 const otherModels = (s) => (s.models ?? []).filter((m) => agentOf(m) !== (s.backend ?? "claude") && m.value !== "default" && !m.value.startsWith("claude-"));
 export const AGENTS = { claude: "Claude", agy: "Antigravity" };
 
-// Antigravity's logo has its own colours; Claude's is a one-colour glyph.
-export const agentIcon = (backend, size, color) => backend === "agy"
-  ? image("icons/antigravity.svg").size(size).flex_none()
-  : svg("icons/claude.svg").size(size).flex_none().text_color(color);
+// Coloured logos are images; one-colour glyphs take the text colour.
+const ICONS = { claude: { svg: "icons/claude.svg" }, agy: { image: "icons/antigravity.svg" } };
+export const agentIcon = (backend, size, color) => {
+  const i = ICONS[backend] ?? ICONS.claude;
+  return i.image ? image(i.image).size(size).flex_none() : svg(i.svg).size(size).flex_none().text_color(color);
+};
 
 function currentModel(s) {
   const ms = ownModels(s);

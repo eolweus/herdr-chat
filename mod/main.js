@@ -14,7 +14,7 @@ import { composer, RUN_TAG, isRunOutput } from "./composer.js";
 import { handoffCard, handoffStrip, isHandoffPost } from "./handoff.js";
 import { moveChat } from "./move.js";
 import { McpDialog } from "./mcp.js";
-import { AGENTS, availableModes, modelLabel } from "./composer.js";
+import { AGENTS, agentIcon, availableModes, modelLabel } from "./composer.js";
 import { PROTOCOL, endpoint, openAuth } from "./engine.js";
 import { FileLinks, openFile } from "./filelinks.js";
 import { SidePanel } from "./side.js";
@@ -1209,14 +1209,16 @@ export default class HerdrChat extends View {
       .when(recent.length > 0, (el) => el.child(v_flex().mt(28).w_full().max_w(560).gap(2)
         .child(div().px(10).pb(4).text_size(11.5).text_color(t.dim).child("Pick up where you left off"))
         .children(recent.map((r) => h_flex().id(`resume-${r.id}`).gap(10).px(10).py(7).rounded(8).items_center().cursor_pointer()
-          .hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.resume(r.id, cx))
+          .hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.resume(r, cx))
+          .tooltip(AGENTS[r.backend] ?? r.backend)
+          .child(agentIcon(r.backend, 14, t.dim))
           .child(div().flex_1().min_w(0).truncate().text_size(13).text_color(t.foreground).child(r.title))
           .when(Boolean(r.branch) && r.branch !== "HEAD", (el) => el.child(div().flex_none().text_size(11.5).text_color(t.dim).child(r.branch)))
           .child(div().flex_none().w(64).text_right().text_size(11.5).text_color(t.dim).child(ago(r.when)))))));
   }
 
-  resume(id, cx) {
-    this.send({ type: "resume", id });
+  resume(r, cx) {
+    this.send({ type: "resume", id: r.id, backend: r.backend });
     this.recent = null;
     cx.notify();
   }
