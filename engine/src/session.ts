@@ -1,4 +1,4 @@
-import { forkSession, getSessionInfo, getSessionMessages, query, type PermissionResult, type PermissionUpdate, type Query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { forkSession, getSessionInfo, getSessionMessages, query, type Options, type PermissionResult, type PermissionUpdate, type Query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { Image, Item, McpServer, McpTool, Output, State } from "./items";
@@ -7,6 +7,7 @@ import { beforeCompacts, prLinks, savedImages } from "./history";
 import { describe } from "./tools";
 import { refreshLimits } from "./limits";
 import { prsOf, reposOf } from "./changes";
+import { memoryOf, type Proc, type Server } from "./memory";
 
 export type Client = { send(o: unknown): void };
 
@@ -337,7 +338,9 @@ export class Session {
         model: this.options.model,
         enableFileCheckpointing: true,
         canUseTool: (tool, input, opts) => this.ask(tool, input, opts.toolUseID, opts.suggestions, opts.signal),
-      },
+        // Not in the SDK's types, but its local spawn calls it.
+        onProcessSpawned: (pid: number) => { this.pid = pid; },
+      } as Options,
     });
     this.q = q;
     if (this.options.flags) q.applyFlagSettings(this.options.flags as any).catch(() => {});
@@ -351,7 +354,8 @@ export class Session {
         this.box.close();
         this.box = inbox();
         this.denyAll("Claude stopped");
-        this.n.setState({ busy: false, status: null, remote: null, tasks: [] });
+        this.pid = null;
+        this.n.setState({ busy: false, status: null, remote: null, tasks: [], memory: null });
         this.schedule();
       }
     })();
@@ -419,7 +423,21 @@ export class Session {
   protected async mcp() {
     const list = await this.q?.mcpServerStatus().catch(() => null);
     if (!list) return;
+    this.launched = list.map((m) => {
+      const c = (m.config ?? {}) as { command?: string; args?: string[] };
+      return { name: label(m.name), command: c.command ?? "", args: c.args ?? [] };
+    }).filter((s) => s.command);
     this.n.setState({ mcp: list.filter((m) => m.status === "needs-auth").map((m) => ({ name: m.name, label: label(m.name) })) });
+    this.schedule();
+  }
+
+  pid: number | null = null;
+  private launched: Server[] = [];
+
+  measure(procs: Proc[]) {
+    const memory = this.pid ? memoryOf(this.pid, procs, this.launched) : null;
+    if (JSON.stringify(memory) === JSON.stringify(this.state.memory)) return;
+    this.n.setState({ memory });
     this.schedule();
   }
 

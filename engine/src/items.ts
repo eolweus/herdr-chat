@@ -81,7 +81,11 @@ export type State = {
   repos: RepoChange[];
   /** The first message, a title until the session has one. */
   first: string | null;
+  /** The running CLI and the processes it started; null while it isn't running. */
+  memory: Memory | null;
 };
+
+export type Memory = { mb: number; parts: { name: string; mb: number; procs: number }[] };
 
 export type Output = { path: string; name: string; created: boolean; add: number; del: number };
 export type RepoChange = { root: string; name: string; remote: string | null; add: number; del: number; files: number };

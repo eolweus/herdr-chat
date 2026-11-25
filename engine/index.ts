@@ -7,6 +7,7 @@ import { Session, userSettings, type Client, type Handoff } from "./src/session"
 import { ReplaySession } from "./src/replay";
 import { refreshLimits } from "./src/limits";
 import { projectServers } from "./src/projects";
+import { processes } from "./src/memory";
 
 const PROTOCOL = 3;
 const HOME = process.env.HOME!;
@@ -301,6 +302,14 @@ for (const hostname of HOSTS) {
     },
   });
 }
+
+// Only chats a pane is showing; the panel's Memory section reads it.
+setInterval(async () => {
+  const live = [...sessions.values()].filter((s) => s.pid && s.clients.size);
+  if (!live.length) return;
+  const procs = await processes().catch(() => null);
+  if (procs) for (const s of live) s.measure(procs);
+}, 10_000);
 
 // A stalled event loop shows as lag; the hourly line shows it was still alive.
 let tick = Date.now(), beats = 0;
