@@ -6,6 +6,10 @@ import { h_flex } from "gpui-base";
 import { exec, notify, panes, run, setShared, shared, spaces } from "herdr";
 
 export const HANDOFF = "#a970ff";
+// Matches the sidebar: one-off handoffs purple, orchestrated teal, standalone neutral.
+const KIND_COLORS = { orchestrated: "#22a99a", standalone: "#8c929c" };
+const kindColor = (h) => KIND_COLORS[h?.kind] ?? HANDOFF;
+const KIND_NAMES = { orchestrated: "Orchestrated handoff", standalone: "Standalone handoff" };
 
 const live = () => shared("handoffs") ?? [];
 const color = (machine, t) => (shared("machine.colors") ?? {})[machine ?? "local"] ?? t.dim;
@@ -26,9 +30,10 @@ async function markDone(h) {
 }
 
 function doneButton(id, h, t, after) {
+  const c = kindColor(h);
   if (closing()[h.id]) return div().flex_none().text_size(12).text_color(t.dim).child(h.status === "working" ? "Closing after this turn…" : "Closing…");
   return div().id(id).flex_none().px(8).h(22).rounded(6).flex().items_center().cursor_pointer()
-    .bg(HANDOFF + "26").text_color(HANDOFF).text_size(12).font_semibold().hover((s) => s.bg(HANDOFF + "44"))
+    .bg(c + "26").text_color(c).text_size(12).font_semibold().hover((s) => s.bg(c + "44"))
     .tooltip("Close this handoff's session once its current turn ends")
     .on_click((_e, cx) => { cx.stop_propagation(); markDone(h).then((ok) => ok && after?.()); })
     .child("✓ Mark done");
@@ -56,7 +61,8 @@ function state(h, t) {
   if (!h) return div().flex_none().text_size(12).text_color(t.dim).child("Closed");
   if (h.status === "blocked") return div().flex_none().px(6).h(17).rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).flex().items_center().child("Needs you");
   if (h.status === "working") return div().flex_none().text_size(12).text_color(t.working).child("Working…");
-  if (h.result === "done") return div().flex_none().text_size(12).font_semibold().text_color(HANDOFF).child("✓ Done");
+  if (h.report?.status === "blocked") return div().flex_none().px(6).h(17).rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).flex().items_center().child("Asks the sender");
+  if (h.result === "done") return div().flex_none().text_size(12).font_semibold().text_color(kindColor(h)).child("✓ Done");
   if (h.result === "failed") return div().flex_none().text_size(12).font_semibold().text_color(t.ansi1).child("✗ Failed");
   return div().flex_none().text_size(12).text_color(t.dim).child("Idle");
 }
@@ -70,12 +76,13 @@ export function handoffCard(item, t, view) {
   const machine = h?.label ?? to.split("/")[0];
   const pending = item.status === "running" || item.status === "waiting";
   const failed = item.status === "error";
+  const c = kindColor(h ?? { kind: quoted(item.detail ?? "", "--kind") });
   return h_flex().w_full().px(22).py(5).child(
     h_flex().id(`handoff-${item.id}`).w_full().gap(8).items_center().px(12).py(8).rounded(10)
-      .border_1().border_color(HANDOFF + "66").bg(HANDOFF + "12")
-      .when(Boolean(h), (el) => el.cursor_pointer().hover((s) => s.bg(HANDOFF + "24")).on_click(() => openHandoff(h, view.pane)))
-      .child(div().flex_none().text_size(14).font_bold().text_color(HANDOFF).child("⤷"))
-      .child(div().flex_none().text_size(13).font_semibold().text_color(HANDOFF).child(pending ? "Handing off to" : failed ? "Couldn't hand off to" : "Handed off to"))
+      .border_1().border_color(c + "66").bg(c + "12")
+      .when(Boolean(h), (el) => el.cursor_pointer().hover((s) => s.bg(c + "24")).on_click(() => openHandoff(h, view.pane)))
+      .child(div().flex_none().text_size(14).font_bold().text_color(c).child("⤷"))
+      .child(div().flex_none().text_size(13).font_semibold().text_color(c).child(pending ? "Handing off to" : failed ? "Couldn't hand off to" : "Handed off to"))
       .child(chip(machine, h ? color(h.machine, t) : t.dim))
       .child(div().flex_1().min_w(0).truncate().text_size(13).text_color(t.foreground).child(title))
       .when(!pending && !failed, (el) => el.child(state(h, t)))
@@ -101,17 +108,20 @@ export function handoffStrip(view, t) {
   const from = String(meta.from ?? "").split("/")[0] || "?";
   const sender = h && senderTitle(h);
   const back = h && (h.parent ?? (h.parentKey ? chatPane(h.parentKey) : null));
+  const c = kindColor(h ?? meta);
+  const kind = (h ?? meta).kind;
+  const note = kind && kind !== "once" && h?.report?.note && !h.result ? h.report.note : null;
   return h_flex().px(16).py(6).gap(8).flex_none().items_center().text_size(12.5)
-    .bg(HANDOFF + "14").border_b_1().border_color(HANDOFF + "40")
-    .child(div().w(3).h(16).rounded(2).bg(HANDOFF))
-    .child(div().flex_none().text_size(14).font_bold().text_color(HANDOFF).child("⤷"))
-    .child(div().flex_none().font_semibold().text_color(HANDOFF).child("Handoff"))
+    .bg(c + "14").border_b_1().border_color(c + "40")
+    .child(div().w(3).h(16).rounded(2).bg(c))
+    .child(div().flex_none().text_size(14).font_bold().text_color(c).child("⤷"))
+    .child(div().flex_none().font_semibold().text_color(c).child(KIND_NAMES[kind] ?? "Handoff"))
     .child(div().flex_none().text_color(t.dim).child("from"))
     .child(chip(h?.fromLabel ?? from, h ? color(h.fromMachine, t) : t.dim))
     .when(Boolean(sender), (el) => el.child(div().id("handoff-sender").min_w(0).truncate().text_color(t.muted)
       .when(Boolean(back), (s) => s.cursor_pointer().hover((x) => x.text_color(t.foreground)).on_click(() => run("pane.focus", { pane: back })))
       .child(back ? `${sender} ↩` : sender)))
-    .child(div().flex_1())
+    .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.dim).when(Boolean(note), (el) => el.child(`· ${note}`)))
     .child(div().flex_none().text_color(t.dim).child("running on"))
     .child(chip(h?.label ?? (view.machine ?? "this computer"), color(view.machine, t)))
     .when(Boolean(h), (el) => el.child(state(h, t)))
