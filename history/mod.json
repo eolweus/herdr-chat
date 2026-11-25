@@ -1,0 +1,7 @@
+{
+  "place": "none",
+  "title": "Chat history",
+  "focusable": true,
+  "description": "Search every Claude and Antigravity chat on every connected machine, by title or by what was said, and reopen one beside it.",
+  "palette": [{ "title": "Chat history", "command": "pane.split", "args": { "direction": "right", "mod": "chat-history" }, "words": "search past chats claude antigravity sessions resume" }]
+}

@@ -59,7 +59,8 @@ fi
 mods=~/.config/herdr-app/mods
 if [[ -d $mods ]]; then
   ln -sfn $root/mod $mods/herdr-chat
-  echo "mod: linked $mods/herdr-chat"
+  ln -sfn $root/history $mods/chat-history
+  echo "mods: linked $mods/herdr-chat and $mods/chat-history"
 fi
 
 for _ in {1..20}; do [[ -s ~/.config/herdr-chat/token ]] && break; sleep 0.25; done
