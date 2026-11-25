@@ -53,7 +53,12 @@ export class Panel {
 
   async poll() {
     const term = this.watch;
-    if (!term || this.busy) return;
+    if (!term) {
+      const info = this.last ? shared(`herdr-chat:info:${this.last}`) : null;
+      if (info !== this.shown) { this.shown = info; this.cx.notify(); }
+      return;
+    }
+    if (this.busy) return;
     this.busy = true;
     const h = term.machine ? null : home();
     try { await term.refresh((p) => (h && p?.startsWith(h) ? `~${p.slice(h.length)}` : p ?? "")); } catch {}
