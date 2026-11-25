@@ -30,6 +30,9 @@ export const agyCache = (patch: Msg) => write(AGY_CACHE, { ...agyCached(), ...pa
 
 const tag = (list: Model[] | undefined, backend: string) => (list ?? []).map((m) => ({ ...m, backend }));
 
+// ACP sessions start in Default; the CLI starts in agentMode, or Auto when it's unset.
+export const agyDefaultMode = (): string => read(`${process.env.HOME}/.gemini/antigravity-cli/settings.json`).agentMode ?? "auto";
+
 export const agyModels = (): Model[] => hasAgy() ? tag(agyCached().models, "agy") : [];
 export const claudeModels = (): Model[] => tag(read(CLAUDE_CACHE).models, "claude");
 export const saveClaudeModels = (models: Model[]) => { if (models.length) write(CLAUDE_CACHE, { models }); };

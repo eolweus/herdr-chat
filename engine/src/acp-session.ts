@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Image, McpServer, McpTool } from "./items";
 import { AcpClient } from "./acp";
 import { AcpFeed, MODES, asClaudeTool, modeOf, modelsOf } from "./acp-feed";
-import { AGY, agyCache as cache, agyCached as cached, agyModels, claudeModels, refreshGemini } from "./agy-cache";
+import { AGY, agyCache as cache, agyCached as cached, agyDefaultMode, agyModels, claudeModels, refreshGemini } from "./agy-cache";
 import { Session, type Answer, type Client } from "./session";
 import { describe } from "./tools";
 
@@ -46,7 +46,9 @@ export class AcpSession extends Session {
     this.sid = sessionId;
     this.feed = new AcpFeed(this.n, randomUUID().slice(0, 8), claudeModels);
     const c = cached();
-    Object.assign(this.n.state, { backend: "agy", mode: "default", effort: c.effort ?? null, model: c.model ?? "", models: [...agyModels(), ...claudeModels()], modes: c.modes ?? AGY_MODES, commands: c.commands ?? [] });
+    const modes: { value: string }[] = c.modes ?? AGY_MODES;
+    const start = modeOf(agyDefaultMode());
+    Object.assign(this.n.state, { backend: "agy", mode: modes.some((m) => m.value === start) ? start : "default", effort: c.effort ?? null, model: c.model ?? "", models: [...agyModels(), ...claudeModels()], modes, commands: c.commands ?? [] });
     daemonRunning().then((on) => { if (on) { this.n.setState({ remote: REMOTE_URL }); this.schedule(); } });
   }
 
@@ -90,6 +92,8 @@ export class AcpSession extends Session {
     } else {
       r = await c.request("session/new", { cwd: this.cwd, mcpServers: [] }, 60_000);
       this.sid = r.sessionId;
+      const mode = modeOf(agyDefaultMode());
+      if (!this.wantMode && r.modes?.availableModes?.some((m: Msg) => modeOf(m.id) === mode)) this.wantMode = mode;
     }
     this.c = c;
     this.applyOptions(r);
