@@ -108,7 +108,7 @@ export default class HerdrChat extends View {
       if (!this.pane) this.findPane();
       if (this.links.pending.size) cx.spawn(async (cx) => { if (await this.links.check(this.cwd, this.machine)) cx.notify(); });
       const shown = this.visible();
-      if (shown && !this.shown) this.input.focus();
+      if (shown && (!this.shown || this.handle.is_focused())) this.input.focus();
       this.shown = shown;
       this.pageAndImages(cx);
     });
