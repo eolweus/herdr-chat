@@ -82,9 +82,16 @@ function outputsOf(items: Item[]): Output[] {
   return [...files.values()].reverse();
 }
 
+// A message that starts with quotes (the desktop app's reply format) is named by what follows them.
+const unquoted = (text: string) => {
+  if (!text.startsWith("<!-- reply")) return text;
+  const at = text.indexOf("\n\n\n");
+  return at >= 0 ? text.slice(at + 3) : text.split("\n").find((l) => l.startsWith(">"))?.replace(/^> ?/, "") ?? text;
+};
+
 const firstOf = (items: Item[]) => {
   const u = items.find((i) => i.kind === "user" && !/^(<!-- herdr-chat:run -->|I ran:\n```sh\n)/.test(i.text ?? "") && !(i.text ?? "").slice(0, 300).includes("This session is being continued"));
-  return u?.kind === "user" ? u.text.split("\n")[0]!.slice(0, 200) : null;
+  return u?.kind === "user" ? unquoted(u.text).split("\n")[0]!.slice(0, 200) : null;
 };
 
 const KEEP_IMAGES = 20;
