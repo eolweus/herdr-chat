@@ -988,6 +988,7 @@ export default class HerdrChat extends View {
     this.side ??= new SidePanel(this);
   }
 
+
   addQuote(text, cx) {
     this.ensure();
     if (!text?.trim()) return;
@@ -1003,11 +1004,14 @@ export default class HerdrChat extends View {
   }
 
   // A settled selection in a reply offers to quote it; a selection cleared elsewhere doesn't hide another's bar.
+  // Pressing the bar clears the text's selection first, so the bar outlives it briefly, and for good once pressed.
   selected(key, sel, cx) {
     this.ensure();
     if (sel?.text && sel.position) this.selection = { key, text: sel.text, x: sel.position.x - this.origin.x, y: sel.position.y - this.origin.y };
-    else if (this.selection?.key === key) this.selection = null;
-    else return;
+    else if (this.selection?.key === key && !this.selection.pressed) {
+      const s = this.selection;
+      return cx.timer.after(350, (cx) => { if (this.selection === s && !s.pressed) { this.selection = null; cx.notify(); } });
+    } else return;
     cx.notify();
   }
 
@@ -1016,7 +1020,9 @@ export default class HerdrChat extends View {
     const btn = (id, label, fn) => div().id(id).px(9).py(4).rounded(6).cursor_pointer().text_size(12).text_color(t.foreground)
       .hover((st) => st.bg(t.hover)).on_click((_e, cx) => { cx.stop_propagation(); fn(cx); }).child(label);
     const left = Math.max(8, Math.min(s.x - 90, (this.width ?? 0) - 260));
-    return h_flex().absolute().left(left).top(s.y + 10).p(3).gap(2).rounded(8).border_1().border_color(t.border).bg(t.surface).shadow_lg()
+    return h_flex().id("selection-bar").absolute().left(left).top(s.y + 10).p(3)
+      .on_mouse_down("left", (_e, cx) => { s.pressed = true; cx.stop_propagation(); })
+      .on_mouse_down_out((_e, cx) => { if (this.selection === s && s.pressed) { this.selection = null; cx.notify(); } }).gap(2).rounded(8).border_1().border_color(t.border).bg(t.surface).shadow_lg()
       .child(btn("sel-quote", "Quote", (cx) => this.addQuote(s.text, cx)))
       .child(btn("sel-side", "Ask in side chat", (cx) => { this.side.quote(s.text, cx); this.selection = null; }));
   }
