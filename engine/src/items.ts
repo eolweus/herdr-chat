@@ -101,7 +101,7 @@ export type McpServer = Mcp & {
 export type ProjectServers = { path: string; servers: { name: string; scope: "local" | "project"; transport: string | null; target: string | null }[] };
 export type McpTool = { name: string; description: string; readOnly: boolean; destructive: boolean };
 
-export type Model = { value: string; name: string; description: string; efforts: string[]; resolved: string; fast: boolean };
+export type Model = { value: string; name: string; description: string; efforts: string[]; resolved: string; fast: boolean; backend?: string };
 
 export type Command = { name: string; description: string; hint: string };
 

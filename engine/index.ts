@@ -6,6 +6,7 @@ import { Session, userSettings, type Client, type Handoff } from "./src/session"
 import { ReplaySession } from "./src/replay";
 import { AcpSession } from "./src/acp-session";
 import { refreshLimits } from "./src/limits";
+import { refreshGemini } from "./src/agy-cache";
 import { projectServers } from "./src/projects";
 import { processes } from "./src/memory";
 
@@ -26,7 +27,12 @@ process.on("SIGTERM", () => { console.log("stopping (SIGTERM)"); process.exit(0)
 
 const replay = process.argv.indexOf("--replay");
 if (replay >= 0) ReplaySession.fixture = process.argv[replay + 1]!;
-else { refreshLimits(); setInterval(() => refreshLimits(), 5 * 60_000); }
+else {
+  refreshLimits();
+  setInterval(() => refreshLimits(), 5 * 60_000);
+  refreshGemini(true);
+  setInterval(() => refreshGemini(), 5 * 60_000);
+}
 
 function token(): string {
   if (existsSync(TOKEN_FILE)) return readFileSync(TOKEN_FILE, "utf8").trim();
@@ -68,12 +74,12 @@ function open(key: string, cwd: string, backend?: string): Session {
   return s;
 }
 
-async function reopen(d: Data, s: Session, session: string | null, cwd: string) {
+async function reopen(d: Data, s: Session, session: string | null, cwd: string, backend = s.backend) {
   s.close();
   sessions.delete(s.key);
-  panes[s.key] = { ...panes[s.key], session, cwd, backend: s.backend === "claude" ? undefined : s.backend, remote: s.wantRemote, title: undefined };
+  panes[s.key] = { ...panes[s.key], session, cwd, backend: backend === "claude" ? undefined : backend, remote: s.wantRemote, title: undefined };
   if (replay < 0) savePanes();
-  const next = open(s.key, cwd, s.backend);
+  const next = open(s.key, cwd, backend);
   d.session = next;
   for (const c of s.clients) if (c !== d.client) next.clients.add(c);
   s.clients.clear();
@@ -164,7 +170,16 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
     case "side_close": return s.closeSide();
     case "view": return s.view(d.client, Boolean(m.on));
     case "answer": return s.answer(m as any);
-    case "set": return s.set(m);
+    case "set": {
+      // A model from the other agent starts the chat over on that agent; only an empty chat can.
+      if (m.backend && m.backend !== s.backend) {
+        if (s.state.session || s.n.items.length) return ws.send(JSON.stringify({ type: "error", message: "Pick the other agent's models before the first message" }));
+        await reopen(d, s, null, s.cwd, String(m.backend));
+        const { backend: _, ...rest } = m;
+        return d.session?.set(rest);
+      }
+      return s.set(m);
+    }
     case "mcp_auth": {
       const server = String(m.server);
       const url = await s.signIn(server).catch((e) => { ws.send(JSON.stringify({ type: "error", message: `Sign-in to ${server} failed: ${e?.message ?? e}` })); return undefined; });

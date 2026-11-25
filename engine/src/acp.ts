@@ -1,3 +1,4 @@
+import { AGY } from "./agy-cache";
 import type { Subprocess } from "bun";
 
 type Msg = Record<string, any>;
@@ -9,7 +10,6 @@ export class AcpError extends Error {
   }
 }
 
-export const AGY = Bun.which("agy") ?? `${process.env.HOME}/.local/bin/agy`;
 
 // JSON-RPC 2.0 over an `agy acp` child's stdio, one JSON message per line.
 export class AcpClient {

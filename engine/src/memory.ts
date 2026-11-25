@@ -42,7 +42,7 @@ function pss(p: Proc) {
   }
 }
 
-export function memoryOf(pid: number, all: Proc[], servers: Server[]): Memory | null {
+export function memoryOf(pid: number, all: Proc[], servers: Server[], name = "Claude Code"): Memory | null {
   if (!all.some((p) => p.pid === pid)) return null;
   const mine = new Set([pid]);
   for (let grew = true; grew;) {
@@ -64,7 +64,7 @@ export function memoryOf(pid: number, all: Proc[], servers: Server[]): Memory | 
     part.procs += n;
     parts.set(name, part);
   };
-  add("Claude Code", self.kb, 1);
+  add(name, self.kb, 1);
   for (const c of kids.get(pid) ?? []) add(nameOf(c.args, servers), ...tree(c));
   const list = [...parts.values()].map((p) => ({ ...p, mb: Math.round(p.mb) })).sort((a, b) => b.mb - a.mb);
   return { mb: list.reduce((n, p) => n + p.mb, 0), parts: list, approx: !LINUX };

@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { Image, McpServer, McpTool } from "./items";
 import { AcpClient } from "./acp";
 import { AcpFeed, MODES, asClaudeTool, modelsOf } from "./acp-feed";
+import { AGY, agyCache as cache, agyCached as cached, agyModels, claudeModels, refreshGemini } from "./agy-cache";
 import { Session, type Answer, type Client } from "./session";
 import { describe } from "./tools";
 
@@ -10,23 +10,22 @@ type Msg = Record<string, any>;
 type Entry = { id: string; text: string; images: Image[] };
 
 const IDLE_MS = 5 * 60_000;
-const CACHE = `${process.env.HOME}/.local/state/herdr-chat/agy.json`;
 const NO = (what: string) => new Error(`${what} isn't available for Antigravity chats`);
+const REMOTE_URL = "https://antigravity.google.com";
 
-// agy's model list and commands, so a new chat can show them before agy starts, and the model and effort last picked.
-function cached(): Msg {
-  try { return JSON.parse(readFileSync(CACHE, "utf8")); } catch { return {}; }
+// agy's remote control is one daemon per machine, not a switch per chat.
+async function daemon(...args: string[]) {
+  const p = Bun.spawn([AGY, "remote-control", ...args], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+  const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+  if (code !== 0) throw new Error((err || out).trim().split("\n").pop() || `agy remote-control ${args[0]} failed`);
+  return out;
 }
-function cache(patch: Msg) {
-  try {
-    mkdirSync(CACHE.replace(/\/[^/]+$/, ""), { recursive: true });
-    writeFileSync(CACHE, JSON.stringify({ ...cached(), ...patch }));
-  } catch {}
-}
+const daemonRunning = async () => /Daemon state = (active|running)/.test(await daemon("status").catch(() => ""));
 
 // A chat run by Antigravity's `agy acp`; the pane sees the same items and state as for Claude.
 export class AcpSession extends Session {
   override readonly backend = "agy";
+  protected override agentName = "Antigravity";
   private c: AcpClient | null = null;
   private starting: Promise<AcpClient> | null = null;
   private feed: AcpFeed;
@@ -43,9 +42,10 @@ export class AcpSession extends Session {
   constructor(key: string, cwd: string, sessionId: string | null, onSession: (s: Session) => void) {
     super(key, cwd, sessionId, onSession);
     this.sid = sessionId;
-    this.feed = new AcpFeed(this.n, randomUUID().slice(0, 8));
+    this.feed = new AcpFeed(this.n, randomUUID().slice(0, 8), claudeModels);
     const c = cached();
-    Object.assign(this.n.state, { backend: "agy", mode: "default", effort: c.effort ?? null, model: c.model ?? "", models: c.models ?? [], commands: c.commands ?? [] });
+    Object.assign(this.n.state, { backend: "agy", mode: "default", effort: c.effort ?? null, model: c.model ?? "", models: [...agyModels(), ...claudeModels()], commands: c.commands ?? [] });
+    daemonRunning().then((on) => { if (on) { this.n.setState({ remote: REMOTE_URL }); this.schedule(); } });
   }
 
   override async load() {
@@ -218,6 +218,7 @@ export class AcpSession extends Session {
     this.n.setState({ busy: false, status: null });
     this.lastUsed = Date.now();
     this.schedule();
+    refreshGemini();
     const next = this.queue.shift();
     if (next) { this.queued(); this.run(next); }
     else this.restLater();
@@ -283,6 +284,14 @@ export class AcpSession extends Session {
       .map((x: Msg) => ({ id: x.sessionId, title: x.title || "Untitled", when: Date.parse(x.updatedAt) || 0, branch: null }));
   }
 
+  // Starting it lists every agy conversation on this machine at antigravity.google.com; stopping it ends that for all of them.
+  override async remote(enabled: boolean) {
+    this.wantRemote = enabled;
+    if (enabled !== await daemonRunning()) await daemon(enabled ? "start" : "stop", ...(enabled ? ["--session"] : []));
+    this.n.setState({ remote: enabled ? REMOTE_URL : null });
+    this.schedule();
+  }
+
   override view(_c: Client, on: boolean) {
     this.lastUsed = Date.now();
     if (!on && !this.clients.size) this.restLater();
@@ -292,7 +301,6 @@ export class AcpSession extends Session {
   protected override async title() {}
   protected override async usage() {}
   protected override async mcp() {}
-  override async remote(enabled: boolean) { if (enabled) throw NO("Remote Control"); }
   override async servers(): Promise<McpServer[]> { return []; }
   override async tools(): Promise<McpTool[]> { return []; }
   override async mcpAction() { throw NO("Managing MCP servers"); }

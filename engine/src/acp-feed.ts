@@ -63,7 +63,7 @@ export class AcpFeed {
   private n = 0;
   private thinkingStart = 0;
 
-  constructor(private nz: Normalizer, private prefix: string) {}
+  constructor(private nz: Normalizer, private prefix: string, private others: () => Model[] = () => []) {}
 
   private id() {
     return `${this.prefix}:${++this.n}`;
@@ -129,7 +129,7 @@ export class AcpFeed {
   config(options: Msg[]) {
     const { models, model, effort } = modelsOf(options);
     const patch: Partial<State> = {};
-    if (models.length) patch.models = models;
+    if (models.length) patch.models = [...models.map((m) => ({ ...m, backend: "agy" })), ...this.others()];
     if (model) patch.model = model;
     if (effort !== undefined) patch.effort = effort;
     this.nz.setState(patch);

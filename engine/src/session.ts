@@ -10,6 +10,7 @@ import { refreshLimits } from "./limits";
 import { prsOf, reposOf } from "./changes";
 import { memoryOf, type Proc, type Server } from "./memory";
 import { SideChat } from "./side";
+import { agyModels, claudeModels, saveClaudeModels } from "./agy-cache";
 
 export type Client = { send(o: unknown): void };
 
@@ -43,7 +44,7 @@ const running = new Set<Session>();
 const label = (name: string) => name.split(":").pop()!.replace(/^claude\.ai /, "");
 
 let knownCommands: State["commands"] = [];
-let knownModels: State["models"] = [];
+let knownModels: State["models"] = claudeModels();
 // One CLI fetches the models for every chat; after an engine restart they all load at once.
 let fetchingModels = false;
 
@@ -143,7 +144,7 @@ export class Session {
     this.n = new Normalizer(cwd);
     this.n.state.session = sessionId;
     this.n.state.commands = knownCommands;
-    this.n.state.models = knownModels;
+    this.n.state.models = [...knownModels, ...agyModels()];
     this.n.state.mode = defaultMode();
     this.n.state.effort = userSettings().effortLevel ?? null;
   }
@@ -211,7 +212,7 @@ export class Session {
   }
 
   private needsModels() {
-    if (knownModels.length || fetchingModels) return false;
+    if (knownModels.length && knownCommands.length || fetchingModels) return false;
     fetchingModels = true;
     return true;
   }
@@ -492,8 +493,11 @@ export class Session {
       if (!list) return;
       knownCommands = commandsOf(list);
       const models = await this.q?.supportedModels().catch(() => null);
-      if (models) knownModels = models.map((m) => ({ value: m.value, name: m.displayName, description: m.description, efforts: m.supportedEffortLevels ?? [], resolved: m.resolvedModel ?? m.value, fast: Boolean(m.supportsFastMode) }));
-      this.n.setState({ commands: knownCommands, models: knownModels });
+      if (models) {
+        knownModels = models.map((m) => ({ value: m.value, name: m.displayName, description: m.description, efforts: m.supportedEffortLevels ?? [], resolved: m.resolvedModel ?? m.value, fast: Boolean(m.supportsFastMode), backend: "claude" }));
+        saveClaudeModels(knownModels);
+      }
+      this.n.setState({ commands: knownCommands, models: [...knownModels, ...agyModels()] });
       this.schedule();
     } catch {}
   }
@@ -510,10 +514,11 @@ export class Session {
   }
 
   pid: number | null = null;
+  protected agentName = "Claude Code";
   private launched: Server[] = [];
 
   measure(procs: Proc[]) {
-    const memory = this.pid ? memoryOf(this.pid, procs, this.launched) : null;
+    const memory = this.pid ? memoryOf(this.pid, procs, this.launched, this.agentName) : null;
     if (JSON.stringify(memory) === JSON.stringify(this.state.memory)) return;
     this.n.setState({ memory });
     this.schedule();
