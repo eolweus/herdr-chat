@@ -612,7 +612,7 @@ export default class HerdrChat extends View {
     // A picked command only fills in, so it can take arguments; the next Enter sends.
     const pick = this.commandMatches()[this.commandAt];
     if (pick) return this.complete(pick, cx);
-    this.submit(cx);
+    this.submit(cx, e?.secondary ? "later" : undefined);
   }
 
   // The "/word" being typed at the cursor, at the start or after a space.
@@ -647,7 +647,7 @@ export default class HerdrChat extends View {
     cx.notify();
   }
 
-  submit(cx) {
+  submit(cx, priority) {
     const text = this.input.value().trim();
     if (text === "/mcp") {
       this.input.set_value("");
@@ -679,13 +679,13 @@ export default class HerdrChat extends View {
     }
     if (!this.ws || (!text && !this.attachments.length && !this.quotes.length)) return;
     const encoding = this.attachments.filter((a) => a.data === null);
-    if (encoding.length) return void cx.spawn(async (cx) => { await Promise.all(encoding.map((a) => a.ready)); this.submit(cx); });
+    if (encoding.length) return void cx.spawn(async (cx) => { await Promise.all(encoding.map((a) => a.ready)); this.submit(cx, priority); });
     const waiting = this.pending();
     if (waiting && text && !this.attachments.length) {
       if (waiting.kind === "permission") this.answer({ item: waiting.id, decision: "deny", message: text }, cx);
       else this.answer({ item: waiting.id, answers: null, message: `The user replied instead of picking: ${text}` }, cx);
     }
-    this.prompt(withQuotes(this.quotesOut(), text), this.attachments.filter((a) => a.data).map(({ type, data }) => ({ type, data })));
+    this.prompt(withQuotes(this.quotesOut(), text), this.attachments.filter((a) => a.data).map(({ type, data }) => ({ type, data })), priority);
     this.input.set_value("");
     this.attachments = [];
     this.quotes = [];
@@ -708,7 +708,7 @@ export default class HerdrChat extends View {
     });
   }
 
-  prompt(text, images) {
+  prompt(text, images, priority) {
     const id = uuid();
     // Shown right away; the engine's copy of the same id replaces it.
     if (!this.state.busy && !this.pending()) {
@@ -716,7 +716,7 @@ export default class HerdrChat extends View {
       this.upsert({ id, kind: "user", text, images }, true);
       this.state = { ...this.state, busy: true };
     }
-    this.send({ type: "prompt", id, text, images });
+    this.send({ type: "prompt", id, text, images, priority });
     this.following = true;
     this.stick = true;
   }
