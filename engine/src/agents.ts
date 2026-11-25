@@ -51,7 +51,9 @@ async function claudePast(cwd: string | null) {
 
 // Only text the user or Claude wrote, not paths and ids in the transcript's other fields.
 async function claudeGrep(q: string) {
-  const text = `"(?:text|content)":"(?:[^"\\\\]|\\\\.){0,4000}?${escape(q)}(?:[^"\\\\]|\\\\.){0,80}`;
+  const q1 = escape(q), any = `(?:[^"\\\\]|\\\\.)`;
+  // Text that opens with a tag is a note the harness added (<system-reminder>, <command-name>), not the conversation.
+  const text = `"(?:text|content)":"(?:${q1}|[^<"\\\\]${any}{0,4000}?${q1})${any}{0,80}`;
   const found = await rg(CLAUDE_DIR, ["--max-depth", "2", "-g", "*.jsonl", "-e", text]);
   for (const [id, raw] of found) {
     let s = raw.replace(/^"(?:text|content)":"/, "");
