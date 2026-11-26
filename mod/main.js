@@ -1,6 +1,6 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, TextareaState, InputState, Input, ScrollHandle } from "gpui-base";
-import { appHome, checking, exec, focused, home, nextCommand, notify, openOverlay, panes, props, readTextFile, run, settings, setShared, shared, spaces, theme } from "herdr";
+import { appHome, checking, exec, focused, home, machines, nextCommand, notify, openOverlay, panes, props, readTextFile, run, settings, setShared, shared, spaces, theme } from "herdr";
 import { WebSocket } from "websocket";
 import * as fs from "fs/promises";
 import { Buffer } from "buffer";
@@ -680,7 +680,7 @@ export default class HerdrChat extends View {
     const tok = this.slashToken();
     if (!tok || tok.start === this.dismissed) return [];
     const q = tok.q.toLowerCase();
-    const all = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp" && c.name !== "btw" && c.name !== "model"), { name: "model", description: "Switch model, or agent (Claude or Antigravity) before the first message", hint: "[model]" }, { name: "btw", description: "Ask on the side, in a read-only copy of this chat that doesn't interrupt it or end up in it (Cmd-;)", hint: "[question]" }, { name: "mcp", description: "Manage MCP servers", hint: "" }, { name: "restart-engine", description: "Restart a machine's chat engine, copying the code there first if it's remote (stops running turns)", hint: "[machine]" }, { name: "since", description: `Turn the "Since you left" catch-up ${this.sinceOn() ? "off" : "on"} in all chats`, hint: "" }, { name: "vim", description: `Turn vim keys in this box ${this.vimOn() ? "off" : "on"}`, hint: "" }, { name: "reload", description: "Reopen this chat in the same pane so it picks up new herdr-chat code", hint: "" }, { name: "move", description: "Move this chat to another machine: the conversation continues there and this pane closes", hint: "<machine> [folder] [--force]" }];
+    const all = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp" && c.name !== "btw" && c.name !== "model"), { name: "model", description: "Switch model, or agent (Claude or Antigravity) before the first message", hint: "[model]" }, { name: "btw", description: "Ask on the side, in a read-only copy of this chat that doesn't interrupt it or end up in it (Cmd-;)", hint: "[question]" }, { name: "mcp", description: "Manage MCP servers", hint: "" }, { name: "restart-engine", description: "Restart a machine's chat engine, or all of them, copying the code there first if it's remote (stops running turns)", hint: "[machine|all]" }, { name: "since", description: `Turn the "Since you left" catch-up ${this.sinceOn() ? "off" : "on"} in all chats`, hint: "" }, { name: "vim", description: `Turn vim keys in this box ${this.vimOn() ? "off" : "on"}`, hint: "" }, { name: "reload", description: "Reopen this chat in the same pane so it picks up new herdr-chat code", hint: "" }, { name: "move", description: "Move this chat to another machine: the conversation continues there and this pane closes", hint: "<machine> [folder] [--force]" }];
     const ours = ["btw", "mcp", "move"];
     const list = this.claudeOnly() ? all : all.filter((c) => !ours.includes(c.name) || (this.state.commands ?? []).some((x) => x.name === c.name));
     const starts = list.filter((c) => c.name.toLowerCase().startsWith(q));
@@ -756,6 +756,7 @@ export default class HerdrChat extends View {
     if (restart) {
       this.input.set_value("");
       const m = restart[1];
+      if (m === "all") return [null, ...machines().filter((x) => x.name && x.layout === "ready").map((x) => x.name)].forEach((x) => this.restartEngine(x, cx));
       return this.restartEngine(m === undefined ? this.machine : ["mac", "local", "here"].includes(m) ? null : m, cx);
     }
     if (!this.ws || (!text && !this.attachments.length && !this.quotes.length)) return;
