@@ -83,7 +83,7 @@ export function userRow(item, t, view) {
 }
 
 export function textRow(item, t, view) {
-  return row().py(8).child(markdown(item.id, item.text || " ", t, view.codes, { onRun: (id, code, terminal, cx) => view.runCommand(id, code, terminal, cx), runs: view.runs, links: view.links, onLink: (href, cx) => view.openLink(href, cx), onSelect: (key, sel, cx) => view.selected(key, sel, cx), highlight: (key) => view.find.ranges(key, t) }));
+  return row().py(8).child(markdown(item.id, item.text || " ", t, view.codes, { onRun: (id, code, terminal, cx) => view.runCommand(id, code, terminal, cx), runs: view.runs, links: view.links, onLink: (href, cx) => view.openLink(href, cx), onSelect: (key, sel, cx) => view.selected(key, sel, cx), highlight: (key) => view.find.ranges(key, t), onCopy: (id, code, cx) => view.copyText(id, code, cx), copied: view.copied }));
 }
 
 export function thinkingRow(item, t, view) {
@@ -118,7 +118,7 @@ export function toolRow(item, t, view, children) {
       .when(Boolean(item.detail), (el) => {
         if (DIFF_TOOLS.includes(item.name)) return el.child(diffBlock(item.detail, t, view.mono));
         const state = view.codes.peek(`detail:${item.id}`);
-        return el.child(state ? codeBlock(state, item.detail, t, { maxLines: 30 }) : div());
+        return el.child(state ? codeBlock(state, item.detail, t, { maxLines: 30, id: `detail-${item.id}`, onCopy: (id, code, cx) => view.copyText(id, code, cx), copied: view.copied }) : div());
       })
       .when(Boolean(children.length), (el) => el.child(v_flex().gap(2).children(children.map((c) =>
         h_flex().gap(8).items_center().text_size(12.5).child(dot(c.status, t))

@@ -131,7 +131,7 @@ export class SidePanel {
           .children(quotes.map((q) => quoteBlock(q, t, 12.5)))
           .when(Boolean(body), (el) => el.child(div().text_size(13).child(body))));
       }
-      case "text": return v_flex().w_full().px(14).py(6).child(markdown(`side:${item.id}`, item.text || " ", t, view.codes, { size: 13, links: view.links, onLink: (href, cx) => view.openLink(href, cx) }));
+      case "text": return v_flex().w_full().px(14).py(6).child(markdown(`side:${item.id}`, item.text || " ", t, view.codes, { size: 13, links: view.links, onLink: (href, cx) => view.openLink(href, cx), onCopy: (id, code, cx) => view.copyText(id, code, cx), copied: view.copied }));
       case "thinking": return thinkingRow(item, t, view).px(14);
       case "tool": return toolRow(item, t, view, []).px(14);
       case "notice": return noticeRow(item, t);

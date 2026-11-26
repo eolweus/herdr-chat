@@ -31,10 +31,10 @@ export function permissionCard(item, t, view) {
     .child(h_flex().gap(8).items_baseline().min_w(0)
       .child(div().flex_none().text_size(13.5).font_semibold().child(title))
       .when(Boolean(item.meta), (el) => el.child(div().flex_1().min_w(0).truncate().text_size(12.5).text_color(t.muted).child(item.meta))))
-    .when(Boolean(item.plan), (el) => el.child(div().max_h(420).overflow_hidden().child(markdown(item.id, item.plan, t, view.codes, { size: 13, links: view.links, onLink: (href, cx) => view.openLink(href, cx) }))))
+    .when(Boolean(item.plan), (el) => el.child(div().max_h(420).overflow_hidden().child(markdown(item.id, item.plan, t, view.codes, { size: 13, links: view.links, onLink: (href, cx) => view.openLink(href, cx), onCopy: (id, code, cx) => view.copyText(id, code, cx), copied: view.copied }))))
     .when(Boolean(item.detail) && ["Edit", "MultiEdit", "Write"].includes(item.tool), (el) => el.child(diffBlock(item.detail, t, view.mono, 24)))
     .when(Boolean(item.detail) && !["Edit", "MultiEdit", "Write"].includes(item.tool) && Boolean(view.codes.peek(`detail:${item.id}`)), (el) =>
-      el.child(codeBlock(view.codes.peek(`detail:${item.id}`), item.detail, t, { maxLines: 24 })))
+      el.child(codeBlock(view.codes.peek(`detail:${item.id}`), item.detail, t, { maxLines: 24, id: `detail-${item.id}`, onCopy: (id, code, cx) => view.copyText(id, code, cx), copied: view.copied })))
     .child(pending
       ? v_flex().gap(6)
         .child(h_flex().gap(8)

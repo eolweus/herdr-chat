@@ -1,4 +1,4 @@
-import { div } from "gpui-kit";
+import { div, svg } from "gpui-kit";
 import { v_flex, h_flex, TextView, EditorState, Editor } from "gpui-base";
 import { settings } from "herdr";
 
@@ -96,13 +96,22 @@ function codeView(state, lines) {
     .child(div().w_full().h(2 * h + 3 * LINE).child(Editor.new(state).size_full()));
 }
 
-export function codeBlock(state, code, t, { label, maxLines = 40, onRun, runs, id } = {}) {
+function copyButton(id, code, t, onCopy, copied) {
+  return div().id(`copy-${id}`).flex_none().size(22).flex().items_center().justify_center().rounded(5).cursor_pointer().bg(t.surface)
+    .text_color(copied ? t.done : t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground)).tooltip(copied ? "Copied" : "Copy")
+    .on_click((_e, cx) => onCopy(id, code, cx)).child(svg(`mods/herdr-chat/icons/${copied ? "check" : "copy"}.svg`).size(13));
+}
+
+export function codeBlock(state, code, t, { label, maxLines = 40, onRun, runs, id, onCopy, copied } = {}) {
   const lines = Math.min(code.split("\n").length, maxLines);
   const run = onRun && SHELLS.has(label ?? "");
   const r = run ? runs?.get(id) : null;
-  return v_flex().w_full().rounded(8).border_1().border_color(t.border).bg(t.surface).overflow_hidden()
-    .when(Boolean(label), (el) => el.child(h_flex().px(10).pt(6).items_center().text_size(11).text_color(t.dim)
+  const copy = onCopy && id ? copyButton(id, code, t, onCopy, copied === id) : null;
+  return v_flex().relative().w_full().rounded(8).border_1().border_color(t.border).bg(t.surface).overflow_hidden()
+    .when(Boolean(copy && !label), (el) => el.child(div().absolute().top(5).right(6).child(copy)))
+    .when(Boolean(label), (el) => el.child(h_flex().px(10).pt(6).gap(4).items_center().text_size(11).text_color(t.dim)
       .child(div().flex_1().child(label))
+      .when(Boolean(copy), (el) => el.child(copy))
       .when(run, (el) => el.child(h_flex().id(`run-${id}`).gap(4).px(6).py(1).rounded(5).items_center().cursor_pointer()
         .text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground)).tooltip("Run here · Shift-click to run in a terminal")
         .on_click((e, cx) => onRun(id, commandOf(label, code), e.modifiers.shift, cx))
@@ -111,7 +120,7 @@ export function codeBlock(state, code, t, { label, maxLines = 40, onRun, runs, i
     .when(Boolean(r), (el) => el.child(runOutput(r, t, id, (cx) => onRun(id, null, false, cx))));
 }
 
-export function markdown(id, text, t, codes, { size = 14, onRun, runs, links, onLink, onSelect, highlight } = {}) {
+export function markdown(id, text, t, codes, { size = 14, onRun, runs, links, onLink, onSelect, highlight, onCopy, copied } = {}) {
   const parts = split(text);
   return v_flex().w_full().gap(10).children(parts.map((p, i) => {
     if (p.kind === "md") return TextView.markdown(`${id}:${i}`, links ? links.linkify(p.text) : p.text).selectable(true).text_size(size).w_full()
@@ -120,7 +129,7 @@ export function markdown(id, text, t, codes, { size = 14, onRun, runs, links, on
       .map((el) => (highlight?.(`${id}:${i}`) ?? []).reduce((e, [a, b, c]) => e.highlight_range(a, b, c), el));
     const state = p.open ? null : codes.peek(`${id}:${i}`);
     if (!state) return TextView.markdown(`${id}:${i}`, "```" + p.lang + "\n" + p.code + "\n```").selectable(true).text_size(size).w_full();
-    return codeBlock(state, p.code, t, { label: p.lang, maxLines: 400, onRun, runs, id: `${id}-${i}` });
+    return codeBlock(state, p.code, t, { label: p.lang, maxLines: 400, onRun, runs, id: `${id}-${i}`, onCopy, copied });
   }));
 }
 
