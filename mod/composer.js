@@ -111,7 +111,7 @@ export function composer(view, t) {
         .child(div().flex_1().min_w(0).child(Textarea.new(view.input).w_full().px(10).py(7).text_size(14).bg(t.surface)))
         .child(div().id("send").mb(4).w(30).h(30).rounded(15).flex().items_center().justify_center().cursor_pointer()
           .bg(stop ? t.raised : t.solid).text_color(stop ? t.foreground : t.solid_foreground).text_size(13)
-          .tooltip(stop ? "Stop (Esc)" : s.busy ? "Steer (Enter) · Queue for later (Cmd-Enter)" : "Send (Enter)")
+          .tooltip(stop ? "Stop (Ctrl-C)" : s.busy ? "Steer (Enter) · Queue for later (Cmd-Enter)" : "Send (Enter)")
           .hover((s) => s.opacity(0.85))
           .on_click((_e, cx) => (stop ? view.interrupt(cx) : view.submit(cx)))
           .child(stop ? "■" : "↑"))))

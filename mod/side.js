@@ -164,7 +164,7 @@ export class SidePanel {
             .child(div().flex_1().min_w(0).child(Textarea.new(this.input).w_full().px(8).py(6).text_size(13).bg(t.surface)))
             .child(div().id("side-send").mb(3).w(26).h(26).rounded(13).flex().items_center().justify_center().cursor_pointer()
               .bg(this.busy ? t.raised : t.solid).text_color(this.busy ? t.foreground : t.solid_foreground).text_size(12)
-              .tooltip(this.busy ? "Stop (Esc)" : "Ask (Enter)").hover((s) => s.opacity(0.85))
+              .tooltip(this.busy ? "Stop (Ctrl-C)" : "Ask (Enter)").hover((s) => s.opacity(0.85))
               .on_click((_e, cx) => (this.busy ? this.interrupt(cx) : this.submit(cx)))
               .child(this.busy ? "■" : "↑")))));
   }

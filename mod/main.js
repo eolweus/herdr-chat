@@ -1125,8 +1125,9 @@ export default class HerdrChat extends View {
     else if (e.keystroke === "cmd-;") this.side.toggle(cx);
     else if (e.keystroke === "escape" && this.selection) this.dismissSelection(cx);
     else if (this.vimKey(e, cx)) return;
-    else if (e.keystroke === "escape" && this.side.focused) { if (this.side.busy) this.side.interrupt(cx); else this.side.close(cx); }
-    else if (e.keystroke === "escape" && this.state.busy) this.interrupt(cx);
+    else if (e.keystroke === "ctrl-c" && this.side.focused && this.side.busy) this.side.interrupt(cx);
+    else if (e.keystroke === "escape" && this.side.focused && !this.side.busy) this.side.close(cx);
+    else if (e.keystroke === "ctrl-c" && this.state.busy) this.interrupt(cx);
     else if (e.keystroke === "shift-tab") this.cycleMode(cx);
     else return;
     cx.stop_propagation();
