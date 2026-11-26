@@ -52,7 +52,7 @@ export class Since {
   }
 
   // Returns the card when the user just came back to a chat that moved on while they were away.
-  tick(here, items, now = Date.now()) {
+  tick(here, items, busy, now = Date.now()) {
     if (here === this.here) return null;
     this.here = here;
     if (!here) {
@@ -62,7 +62,7 @@ export class Since {
     }
     const left = this.left;
     this.left = null;
-    if (!left || now - left.at < AWAY_MS) return null;
+    if (!left || busy || now - left.at < AWAY_MS) return null;
     const fresh = items.filter((i) => !left.ids.has(i.id));
     if (!isALot(fresh)) return null;
     this.card = { left, away: now - left.at, from: fresh[0].id, ids: new Set(fresh.map((i) => i.id)), summary: null, error: null, asked: null };
