@@ -130,9 +130,10 @@ export default class HerdrChat extends View {
         this.since.here = false;
         this.fakeAway = null;
       }
-      const back = this.since.tick(shown && windowActive(), this.items, this.state.busy);
+      const back = this.since.tick(shown && windowActive(), this.items);
       if (back) {
-        if (this.items.some((i) => back.ids.has(i.id) && i.kind === "text")) { back.asked = uuid(); this.send({ type: "summarize", id: back.asked, from: back.from }); }
+        back.asked = uuid();
+        this.send({ type: "summarize", id: back.asked, from: back.from });
         cx.notify();
       }
       // The engine starts a stopped chat's CLI once it has been looked at for a moment, and keeps it while it is.
