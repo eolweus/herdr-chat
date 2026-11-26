@@ -3,7 +3,6 @@ import { v_flex, h_flex } from "gpui-base";
 
 export const AWAY_MS = 5 * 60000;
 const EDITS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
-const SHOWN = new Set(["text", "tool", "turn_end", "permission", "question", "notice"]);
 
 export function span(ms) {
   const m = Math.max(1, Math.round(ms / 60000));
@@ -37,6 +36,14 @@ export function waiting(items) {
   return p.kind === "question" ? `a question: ${p.questions?.[0]?.question ?? ""}` : `permission to ${p.verb.toLowerCase()} ${p.meta}`.trim();
 }
 
+// More than one glance at the chat would catch up on.
+export function isALot(fresh) {
+  const turns = fresh.filter((i) => i.kind === "turn_end").length;
+  const tools = fresh.filter((i) => i.kind === "tool" && !i.parent).length;
+  const words = fresh.reduce((k, i) => k + (i.kind === "text" ? i.text.split(/\s+/).filter(Boolean).length : 0), 0);
+  return turns >= 2 || tools >= 10 || words >= 300;
+}
+
 export class Since {
   constructor() {
     this.here = true;
@@ -57,7 +64,7 @@ export class Since {
     this.left = null;
     if (!left || now - left.at < AWAY_MS) return null;
     const fresh = items.filter((i) => !left.ids.has(i.id));
-    if (!fresh.some((i) => SHOWN.has(i.kind))) return null;
+    if (!isALot(fresh)) return null;
     this.card = { left, away: now - left.at, from: fresh[0].id, ids: new Set(fresh.map((i) => i.id)), summary: null, error: null, asked: null };
     return this.card;
   }
