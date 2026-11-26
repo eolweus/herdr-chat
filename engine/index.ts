@@ -229,9 +229,19 @@ function handoffs() {
   });
 }
 
+// Each live session's open permission prompt or question, for the Needs you inbox.
+function pending() {
+  return [...sessions.values()].flatMap((s) => {
+    const item = s.n.items.find((i) => (i.kind === "permission" || i.kind === "question") && i.state === "pending");
+    if (!item) return [];
+    return [{ key: s.key, cwd: s.cwd, title: s.state.title ?? s.handoff?.title ?? s.state.first ?? null, backend: s.state.backend, handoff: Boolean(s.handoff), item }];
+  });
+}
+
 async function api(req: Request, path: string): Promise<Response> {
   if (!authed(req.headers.get("authorization")?.replace(/^Bearer /, ""))) return json({ error: "unauthorized" }, 401);
   if (req.method === "GET" && path === "/api/handoffs") return json({ handoffs: handoffs() });
+  if (req.method === "GET" && path === "/api/pending") return json({ pending: pending() });
   const url = new URL(req.url);
   if (req.method === "GET" && path === "/api/status") {
     const key = url.searchParams.get("key") ?? "";
@@ -272,6 +282,10 @@ async function api(req: Request, path: string): Promise<Response> {
   }
   const s = sessions.get(key) ?? (panes[key] && !panes[key]!.closed ? open(key, panes[key]!.cwd) : undefined);
   if (!s) return json({ error: `no session ${key}` }, 404);
+  if (path === "/api/answer") {
+    s.answer({ item: String(b.item), decision: b.decision, answers: b.answers, message: b.message });
+    return json({ ok: true });
+  }
   if (path === "/api/prompt") {
     await s.load();
     s.prompt(String(b.text ?? ""), []);
