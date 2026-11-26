@@ -4,9 +4,15 @@ import type { Item } from "./items";
 const CLAUDE = Bun.which("claude") ?? `${process.env.HOME}/.local/bin/claude`;
 const MAX_CHARS = 40_000;
 
-const BUSY = `The agent is still working: lead with what it is doing right now, then what it got done so far.`;
+const BUSY = `The agent is still working: the NOW line says what it is doing right now.`;
 
-const PROMPT = `Below is what happened in a coding agent's chat while the user was away. Write them a catch-up in 2-4 short plain sentences: where things stand now, what changed, and anything that needs their attention or decision. Name concrete files, commands and outcomes. Plain text only: no markdown, backticks, headings or lists. Don't greet or speculate beyond the log.`;
+const PROMPT = `Below is what happened in a coding agent's chat while the user was away. Write them a catch-up in exactly this format, plain text with no markdown or backticks:
+
+NOW: one short sentence on where things stand.
+- one short line per notable change or outcome, 2 to 5 of them, naming concrete files, commands and results
+NEEDS: one short sentence on what needs their decision or attention, or leave this line out if nothing does.
+
+Don't greet or speculate beyond the log.`;
 
 export function excerpt(items: Item[]): string {
   const lines: string[] = [];
