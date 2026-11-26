@@ -67,6 +67,12 @@ export default class HerdrChat extends View {
     // The input's own up/down bindings sit deeper than this view, so the list's keys are bound inside it too.
     cx.bind_keys([["tab", "herdr-chat-complete"], ["enter", "herdr-chat-complete"], ["up", "herdr-chat-up"], ["down", "herdr-chat-down"], ["ctrl-k", "herdr-chat-up"], ["ctrl-j", "herdr-chat-down"]]
       .flatMap(([keystroke, action]) => ["HerdrChatCommands", "HerdrChatCommands > Input"].map((context) => ({ keystroke, action, context }))));
+    // The textarea's own bindings for these run before any key_down listener, so vim takes them first.
+    cx.bind_keys([
+      ...["HerdrChatVim", "HerdrChatVimNormal"].map((c) => ({ keystroke: "escape", action: "herdr-chat-vim-escape", context: `${c} > Input` })),
+      ...[["backspace", "backspace"], ["left", "left"], ["right", "right"], ["up", "up"], ["down", "down"], ["enter", "enter"], ["cmd-enter", "cmd-enter"]]
+        .map(([keystroke, k]) => ({ keystroke, action: `herdr-chat-vim-${k}`, context: "HerdrChatVimNormal > Input" })),
+    ]);
     this.machine = p.machine || null;
     this.cwd = p.cwd ?? focused()?.cwd ?? null;
     this.items = [];
@@ -104,7 +110,7 @@ export default class HerdrChat extends View {
     this.pickId = null;
     this.resumeId = p.resume ?? null;
     this.since = new Since();
-    this.vim = new Vim();
+    this.vim = new Vim({ read: () => this.cx?.read_from_clipboard(), write: (s) => this.cx?.write_to_clipboard(s) });
     this.fakeAway = typeof p.since === "number" ? p.since : null;
     this.commandAt = 0;
     this.handle = cx.focus_handle();
@@ -655,10 +661,14 @@ export default class HerdrChat extends View {
       this.input.set_value(v.slice(0, at - 1) + v.slice(at));
       this.input.set_selected_range({ start: at - 1, end: at - 1 });
     }
+    this.send(cx, e?.secondary);
+  }
+
+  send(cx, later) {
     // A picked command only fills in, so it can take arguments; the next Enter sends.
     const pick = this.commandMatches()[this.commandAt];
     if (pick) return this.complete(pick, cx);
-    this.submit(cx, e?.secondary ? "later" : undefined);
+    this.submit(cx, later ? "later" : undefined);
   }
 
   // The "/word" being typed at the cursor, at the start or after a space.
@@ -1135,10 +1145,10 @@ export default class HerdrChat extends View {
   // True when vim took the key; normal mode swallows the keys it doesn't know so they don't type.
   vimKey(e, cx) {
     if (!this.vimOn() || !this.focusedInput) return false;
-    const mods = /^(ctrl|cmd|alt)-/.test(e.keystroke);
-    const k = mods ? e.keystroke : e.key_char ?? e.key;
+    const k = /^(ctrl|cmd|alt)-/.test(e.keystroke) ? e.keystroke : e.key_char?.length === 1 && e.key_char > " " ? e.key_char : e.key;
     const text = this.input.value();
     const at = this.input.selected_range().start;
+    this.cx = cx;
     const r = this.vim.key(k, text, at);
     if (!r) {
       if (this.vim.mode === "normal") this.input.set_selected_range({ start: at, end: at });
@@ -1153,10 +1163,25 @@ export default class HerdrChat extends View {
     }
     // A one-character selection stands in for vim's block cursor.
     const block = this.vim.mode === "normal" && r.at < r.text.length && r.text[r.at] !== "\n";
-    this.input.set_selected_range({ start: r.at, end: block ? r.at + 1 : r.at });
+    this.input.set_selected_range(r.sel ?? { start: r.at, end: block ? r.at + 1 : r.at });
     cx.stop_propagation();
     cx.notify();
     return true;
+  }
+
+  vimAction(k, cx) {
+    if (k === "escape") return this.key({ keystroke: "escape", key: "escape", modifiers: {} }, cx);
+    if (k === "enter" || k === "cmd-enter") {
+      const at = this.input.selected_range().start;
+      this.input.set_selected_range({ start: at, end: at });
+      return this.send(cx, k === "cmd-enter");
+    }
+    this.vimKey({ keystroke: k, key: k, modifiers: {} }, cx);
+  }
+
+  vimContext() {
+    if (!this.vimOn() || this.commandMatches().length) return null;
+    return this.vim.mode === "insert" ? "HerdrChatVim" : "HerdrChatVimNormal";
   }
 
   // GPUI doesn't report the scroll offset, so the distance from the bottom is tracked from wheel moves.
@@ -1315,6 +1340,15 @@ export default class HerdrChat extends View {
       .on_mouse_move((e) => { this.origin = { x: e.position.x - e.local_position.x, y: e.position.y - e.local_position.y }; })
       .on_size_change((size) => { this.width = size.width; })
       .when(this.commandMatches().length > 0, (el) => el.key_context("HerdrChatCommands"))
+      .when(Boolean(this.vimContext()), (el) => el.key_context(this.vimContext()))
+      .on_action("herdr-chat-vim-escape", (_e, cx) => this.vimAction("escape", cx))
+      .on_action("herdr-chat-vim-backspace", (_e, cx) => this.vimAction("backspace", cx))
+      .on_action("herdr-chat-vim-left", (_e, cx) => this.vimAction("left", cx))
+      .on_action("herdr-chat-vim-right", (_e, cx) => this.vimAction("right", cx))
+      .on_action("herdr-chat-vim-up", (_e, cx) => this.vimAction("up", cx))
+      .on_action("herdr-chat-vim-down", (_e, cx) => this.vimAction("down", cx))
+      .on_action("herdr-chat-vim-enter", (_e, cx) => this.vimAction("enter", cx))
+      .on_action("herdr-chat-vim-cmd-enter", (_e, cx) => this.vimAction("cmd-enter", cx))
       .on_action("herdr-chat-complete", (_e, cx) => { const cmds = this.commandMatches(); if (cmds.length) this.complete(cmds[this.commandAt] ?? cmds[0], cx); })
       .on_action("herdr-chat-up", (_e, cx) => this.moveCommand(-1, cx))
       .on_action("herdr-chat-down", (_e, cx) => this.moveCommand(1, cx))
