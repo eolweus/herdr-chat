@@ -78,6 +78,12 @@ function open(key: string, cwd: string, backend?: string): Session {
   return s;
 }
 
+// A closed handoff's session reopens under its board key, so it shows under its sender again.
+function withHandoffs<T extends { id: string }>(chats: T[]) {
+  const keys = new Map(Object.entries(panes).filter(([, p]) => p.handoff && p.closed && p.session).map(([k, p]) => [p.session!, k]));
+  return chats.map((c) => (keys.has(c.id) ? { ...c, handoffKey: keys.get(c.id) } : c));
+}
+
 async function reopen(d: Data, s: Session, session: string | null, cwd: string, backend = s.backend) {
   s.close();
   sessions.delete(s.key);
@@ -112,6 +118,11 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
   if (!d.authed) return ws.close(4001, "unauthorized");
   if (m.type === "open") {
     d.session?.detach(d.client);
+    const was = panes[String(m.key)];
+    if (m.reopen && was?.handoff && was.closed) {
+      delete was.closed;
+      if (replay < 0) savePanes();
+    }
     const s = open(String(m.key || crypto.randomUUID()), String(m.cwd || HOME), m.backend ? String(m.backend) : undefined);
     d.session = s;
     console.log(`open ${s.key}`);
@@ -120,7 +131,7 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
     if (!existsSync(s.cwd)) ws.send(JSON.stringify({ type: "error", message: `${s.cwd} doesn't exist on this machine` }));
     return;
   }
-  if (m.type === "history") return ws.send(JSON.stringify({ type: "history", id: m.id ?? null, chats: replay >= 0 ? [] : await searchChats(String(m.q ?? "")) }));
+  if (m.type === "history") return ws.send(JSON.stringify({ type: "history", id: m.id ?? null, chats: replay >= 0 ? [] : withHandoffs(await searchChats(String(m.q ?? ""))) }));
   const s = d.session;
   if (!s) return;
   if (m.type === "older") return ws.send(JSON.stringify(s.older(String(m.before))));
