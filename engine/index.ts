@@ -172,7 +172,7 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
     case "side_close": return s.closeSide();
     case "summarize": {
       const id = String(m.id);
-      return summarize(s.n.items, String(m.from))
+      return summarize(s.n.items, String(m.from), s.state.busy)
         .then((text) => ws.send(JSON.stringify({ type: "summary", id, text })))
         .catch((e) => ws.send(JSON.stringify({ type: "summary", id, error: e?.message ?? String(e) })));
     }
