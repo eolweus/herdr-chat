@@ -125,8 +125,7 @@ export default class HerdrChat extends View {
     cx.timer.every(200, (cx) => {
       // A new chat's input takes focus before its pane exists, so the pane is looked up once it does.
       if (!this.pane) this.findPane();
-      const all = shared("herdr-chat:reload");
-      if (all?.at > (this.born ?? 0) && this.pane && !this.reloading && (all.machine === "all" || all.machine === (this.machine ?? null))) { this.reloading = true; this.reload(false); }
+      this.checkReload();
       if (this.links.pending.size) cx.spawn(async (cx) => { if (await this.links.check(this.cwd, this.machine)) cx.notify(); });
       const shown = this.visible();
       this.shownSince = shown ? this.shownSince ?? Date.now() : null;
@@ -474,6 +473,11 @@ export default class HerdrChat extends View {
       run("pane.split", { direction: "right", mod: "herdr-chat", props: { key: m.key, machine: this.machine, cwd: m.cwd, draft, ...(props()?.engine ? { engine: props().engine } : {}) } });
     }
     else if (m.type === "upsert") { this.liveAt = Date.now(); await this.upsert(m.item, true); }
+  }
+
+  checkReload() {
+    const r = shared("herdr-chat:reload");
+    if (r?.at > (this.born ?? 0) && this.pane && !this.reloading && (r.machine === "all" || r.machine === (this.machine ?? null))) { this.reloading = true; this.reload(false); }
   }
 
   // A saved mod file reloads panes in place but skips init and keeps the old snapshot; a fresh pane runs both.
