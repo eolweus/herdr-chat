@@ -108,6 +108,7 @@ export default class HerdrChat extends View {
     this.vim = new Vim({ read: () => this.cx?.read_from_clipboard(), write: (s) => this.cx?.write_to_clipboard(s) });
     this.fakeAway = typeof p.since === "number" ? p.since : null;
     this.sinceTest = this.fakeAway !== null;
+    this.born = Date.now();
     this.commandAt = 0;
     this.handle = cx.focus_handle();
     this.input.focus();
@@ -124,6 +125,8 @@ export default class HerdrChat extends View {
     cx.timer.every(200, (cx) => {
       // A new chat's input takes focus before its pane exists, so the pane is looked up once it does.
       if (!this.pane) this.findPane();
+      const all = shared("herdr-chat:reload");
+      if (all?.at > (this.born ?? 0) && this.pane && !this.reloading && (all.machine === "all" || all.machine === (this.machine ?? null))) { this.reloading = true; this.reload(false); }
       if (this.links.pending.size) cx.spawn(async (cx) => { if (await this.links.check(this.cwd, this.machine)) cx.notify(); });
       const shown = this.visible();
       this.shownSince = shown ? this.shownSince ?? Date.now() : null;
@@ -474,11 +477,11 @@ export default class HerdrChat extends View {
   }
 
   // A saved mod file reloads panes in place but skips init and keeps the old snapshot; a fresh pane runs both.
-  reload() {
+  reload(focus = true) {
     const pane = this.pane ?? panes().find((x) => x.mod === "herdr-chat" && x.focused)?.pane;
     if (!pane) return notify({ title: "Couldn't reload this chat", body: "Its pane wasn't found", level: "error" });
     const draft = this.input.value();
-    run("pane.split", { direction: "right", pane, mod: "herdr-chat", props: { ...props(), key: this.key, machine: this.machine, cwd: this.cwd, draft, reloaded: true } });
+    run("pane.split", { direction: "right", pane, mod: "herdr-chat", props: { ...props(), key: this.key, machine: this.machine, cwd: this.cwd, draft, reloaded: focus } });
     run("pane.close", { pane });
   }
 
@@ -680,7 +683,7 @@ export default class HerdrChat extends View {
     const tok = this.slashToken();
     if (!tok || tok.start === this.dismissed) return [];
     const q = tok.q.toLowerCase();
-    const all = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp" && c.name !== "btw" && c.name !== "model"), { name: "model", description: "Switch model, or agent (Claude or Antigravity) before the first message", hint: "[model]" }, { name: "btw", description: "Ask on the side, in a read-only copy of this chat that doesn't interrupt it or end up in it (Cmd-;)", hint: "[question]" }, { name: "mcp", description: "Manage MCP servers", hint: "" }, { name: "restart-engine", description: "Restart a machine's chat engine, or all of them, copying the code there first if it's remote (stops running turns)", hint: "[machine|all]" }, { name: "since", description: `Turn the "Since you left" catch-up ${this.sinceOn() ? "off" : "on"} in all chats`, hint: "" }, { name: "vim", description: `Turn vim keys in this box ${this.vimOn() ? "off" : "on"}`, hint: "" }, { name: "reload", description: "Reopen this chat in the same pane so it picks up new herdr-chat code", hint: "" }, { name: "move", description: "Move this chat to another machine: the conversation continues there and this pane closes", hint: "<machine> [folder] [--force]" }];
+    const all = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp" && c.name !== "btw" && c.name !== "model"), { name: "model", description: "Switch model, or agent (Claude or Antigravity) before the first message", hint: "[model]" }, { name: "btw", description: "Ask on the side, in a read-only copy of this chat that doesn't interrupt it or end up in it (Cmd-;)", hint: "[question]" }, { name: "mcp", description: "Manage MCP servers", hint: "" }, { name: "restart-engine", description: "Restart a machine's chat engine, or all of them, copying the code there first if it's remote (stops running turns)", hint: "[machine|all]" }, { name: "since", description: `Turn the "Since you left" catch-up ${this.sinceOn() ? "off" : "on"} in all chats`, hint: "" }, { name: "vim", description: `Turn vim keys in this box ${this.vimOn() ? "off" : "on"}`, hint: "" }, { name: "reload", description: "Reopen this chat in the same pane so it picks up new herdr-chat code, or every chat (all) or every chat on a machine", hint: "[all|machine]" }, { name: "move", description: "Move this chat to another machine: the conversation continues there and this pane closes", hint: "<machine> [folder] [--force]" }];
     const ours = ["btw", "mcp", "move"];
     const list = this.claudeOnly() ? all : all.filter((c) => !ours.includes(c.name) || (this.state.commands ?? []).some((x) => x.name === c.name));
     const starts = list.filter((c) => c.name.toLowerCase().startsWith(q));
@@ -732,8 +735,15 @@ export default class HerdrChat extends View {
       });
       return;
     }
-    if (text === "/reload") {
+    const reload = text.match(/^\/reload(?:\s+(\S+))?$/);
+    if (reload) {
       this.input.set_value("");
+      const m = reload[1];
+      if (!m) return this.reload();
+      const machine = m === "all" || !["mac", "local", "here"].includes(m) ? m : null;
+      setShared("herdr-chat:reload", { at: Date.now(), machine });
+      if (machine !== "all" && machine !== (this.machine ?? null)) return notify({ title: `Reloading the chats on ${machine ?? "this computer"}`, level: "info" });
+      this.reloading = true;
       return this.reload();
     }
     const btw = text.match(/^\/btw(?:\s+([\s\S]*))?$/);
