@@ -991,15 +991,26 @@ export default class HerdrChat extends View {
     cx.notify();
   }
 
+  pastePlain(cx) {
+    const text = cx.read_from_clipboard();
+    if (!text) return;
+    this.plainText = text;
+    this.input.replace(text);
+    this.lastValue = this.input.value();
+    cx.notify();
+  }
+
   // Clipboard managers like Raycast paste an image as its file path.
   pastedPath(cx) {
-    const v = this.input.value(), prev = this.lastValue ?? "";
+    const v = this.input.value(), prev = this.lastValue ?? "", plain = this.plainText;
     this.lastValue = v;
+    this.plainText = null;
     if (v.length - prev.length < 5) return;
     let a = 0, b = 0;
     while (a < prev.length && prev[a] === v[a]) a++;
     while (b < prev.length - a && prev[prev.length - 1 - b] === v[v.length - 1 - b]) b++;
     const added = v.slice(a, v.length - b);
+    if (added === plain) return;
     const m = added.trim().match(/^(?:file:\/\/)?(\/.+\.(\w+))$/);
     if (!m || !MIME[m[2].toLowerCase()]) return;
     const path = decodeURI(m[1]);
@@ -1170,6 +1181,7 @@ export default class HerdrChat extends View {
     else if (this.modelMenu && e.keystroke === "escape") { this.modelMenu = false; cx.notify(); }
     else if (this.modeMenu && e.keystroke === "escape") { this.modeMenu = false; cx.notify(); }
     else if (e.keystroke === "cmd-;") this.side.toggle(cx);
+    else if (e.keystroke === "cmd-shift-v" && this.focusedInput) this.pastePlain(cx);
     else if (e.keystroke === "escape" && this.selection) this.dismissSelection(cx);
     else if (this.vimKey(e, cx)) return;
     else if (e.keystroke === "ctrl-c" && this.side.focused && this.side.busy) this.side.interrupt(cx);
