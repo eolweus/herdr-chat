@@ -103,6 +103,7 @@ export default class HerdrChat extends View {
     if (p.draft) this.setDraft(p.draft);
     this.pickId = null;
     this.resumeId = p.resume ?? null;
+    this.reopenHandoff = p.reopen === true;
     this.since = new Since();
     this.vim = new Vim({ read: () => this.cx?.read_from_clipboard(), write: (s) => this.cx?.write_to_clipboard(s) });
     this.fakeAway = typeof p.since === "number" ? p.since : null;
@@ -391,7 +392,8 @@ export default class HerdrChat extends View {
         const { url, token } = await endpoint(this.machine);
         this.ws = await WebSocket.connect(url);
         await this.ws.write(JSON.stringify({ type: "hello", v: PROTOCOL, token }));
-        await this.ws.write(JSON.stringify({ type: "open", key: this.key, cwd: this.cwd, ...(this.backend ? { backend: this.backend } : {}) }));
+        await this.ws.write(JSON.stringify({ type: "open", key: this.key, cwd: this.cwd, ...(this.backend ? { backend: this.backend } : {}), ...(this.reopenHandoff ? { reopen: true } : {}) }));
+        this.reopenHandoff = false;
         if (this.viewing) this.send({ type: "view", on: true });
         this.conn = "connected";
         this.error = null;

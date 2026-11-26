@@ -120,8 +120,10 @@ export default class ChatHistory extends View {
 
   open(c, cx) {
     if (!c) return;
-    const key = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-    const props = { key, cwd: c.cwd, machine: c.machine, resume: c.id, backend: c.backend };
+    const open = c.handoffKey && panes().find((x) => x.mod === "herdr-chat" && shared(`herdr-chat:info:${x.pane}`)?.key === c.handoffKey);
+    if (open) return run("pane.focus", { pane: open.pane });
+    const key = c.handoffKey ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    const props = c.handoffKey ? { key, cwd: c.cwd, machine: c.machine, backend: c.backend, reopen: true } : { key, cwd: c.cwd, machine: c.machine, resume: c.id, backend: c.backend };
     const pane = this.me();
     run("pane.split", { ...(pane && { pane }), direction: "right", mod: "herdr-chat", props });
     cx.notify();
