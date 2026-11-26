@@ -153,7 +153,7 @@ export class Viewer {
         this.track(e);
         cx.stop_propagation();
         if ((e.modifiers?.platform || e.modifiers?.control) && e.local_position) {
-          return this.zoomAt(size, at.s * Math.exp(-e.delta.y / 200), e.local_position, cx);
+          return this.zoomAt(size, at.s * Math.exp(e.delta.y / 200), e.local_position, cx);
         }
         if (!zoomed) return;
         this.pos = { x: at.x + e.delta.x, y: at.y + e.delta.y };
