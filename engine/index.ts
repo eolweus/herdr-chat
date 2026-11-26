@@ -10,6 +10,7 @@ import { refreshGemini } from "./src/agy-cache";
 import { projectServers } from "./src/projects";
 import { processes } from "./src/memory";
 import { summarize } from "./src/summary";
+import { CONTINUE, Running, cutOff } from "./src/running";
 
 const PROTOCOL = 3;
 const HOME = process.env.HOME!;
@@ -24,7 +25,7 @@ for (const level of ["log", "warn", "error"] as const) {
 }
 process.on("uncaughtException", (e) => console.error("uncaught:", e));
 process.on("unhandledRejection", (e) => console.error("unhandled rejection:", e));
-process.on("SIGTERM", () => { console.log("stopping (SIGTERM)"); process.exit(0); });
+process.on("SIGTERM", () => { console.log("stopping (SIGTERM)"); running?.save(true); process.exit(0); });
 
 const replay = process.argv.indexOf("--replay");
 if (replay >= 0) ReplaySession.fixture = process.argv[replay + 1]!;
@@ -54,6 +55,8 @@ function savePanes() {
 }
 
 const sessions = new Map<string, Session>();
+const RUNNING_FILE = `${dirname(PANES_FILE)}/running.json`;
+const running = replay < 0 ? new Running(RUNNING_FILE, () => sessions.values()) : null;
 
 function remember(s: Session) {
   const was = panes[s.key];
@@ -366,5 +369,21 @@ setInterval(() => {
     console.log(`alive: ${live.length} sessions, ${live.reduce((n, s) => n + s.clients.size, 0)} panes, ${Math.round(process.memoryUsage().rss / 1e6)}MB`);
   }
 }, 60_000);
+
+// Chats a restart cut off mid-turn carry on by themselves.
+if (running) {
+  const cut = cutOff(RUNNING_FILE);
+  for (const [key, c] of Object.entries(cut)) {
+    const p = panes[key];
+    if (!p?.session || p.closed || !existsSync(p.cwd)) continue;
+    console.log(`continuing ${key} after restart${c.queue.length ? ` (${c.queue.length} queued)` : ""}`);
+    const s = open(key, p.cwd);
+    s.load().then(() => {
+      s.prompt(CONTINUE, []);
+      for (const text of c.queue) s.prompt(text, [], undefined, "later");
+    }).catch((e) => console.error(`couldn't continue ${key}:`, e));
+  }
+  setInterval(() => running.save(), 2000);
+}
 
 console.log(`herdr-chat engine on ${HOSTS.map((h) => `${h}:${PORT}`).join(", ")}${replay >= 0 ? ` replaying ${ReplaySession.fixture}` : ""}`);
