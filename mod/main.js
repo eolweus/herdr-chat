@@ -1120,7 +1120,7 @@ export default class HerdrChat extends View {
     cx.notify();
   }
 
-  key(e, cx) {
+  onKey(e, cx) {
     this.ensure();
     const cmds = this.commandMatches();
     if (cmds.length && (e.keystroke === "up" || e.keystroke === "down")) this.moveCommand(e.keystroke === "down" ? 1 : -1, cx);
@@ -1170,7 +1170,7 @@ export default class HerdrChat extends View {
   }
 
   vimAction(k, cx) {
-    if (k === "escape") return this.key({ keystroke: "escape", key: "escape", modifiers: {} }, cx);
+    if (k === "escape") return this.onKey({ keystroke: "escape", key: "escape", modifiers: {} }, cx);
     if (k === "enter" || k === "cmd-enter") {
       const at = this.input.selected_range().start;
       this.input.set_selected_range({ start: at, end: at });
@@ -1352,7 +1352,7 @@ export default class HerdrChat extends View {
       .on_action("herdr-chat-complete", (_e, cx) => { const cmds = this.commandMatches(); if (cmds.length) this.complete(cmds[this.commandAt] ?? cmds[0], cx); })
       .on_action("herdr-chat-up", (_e, cx) => this.moveCommand(-1, cx))
       .on_action("herdr-chat-down", (_e, cx) => this.moveCommand(1, cx))
-      .on_key_down((e, cx) => this.key(e, cx))
+      .on_key_down((e, cx) => this.onKey(e, cx))
       .on_drop((e, cx) => cx.spawn(async (cx) => this.drop(e.paths, cx)))
       .on_click((_e, cx) => { this.findPane(); cx.notify(); })
       .child(v_flex().flex_1().min_w(0).h_full()
