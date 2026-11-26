@@ -181,6 +181,7 @@ export default class HerdrChat extends View {
     this.input.on("submit", (e, cx) => this.enter(e, cx));
     this.input.on("paste_other", (_e, cx) => cx.spawn(async (cx) => this.pasteImage(cx)));
     this.input.on("change", (_e, cx) => {
+      this.pastedPath(cx);
       if (!this.input.value()) this.vim.reset();
       this.commandAt = 0;
       if (this.slashToken()?.start !== this.dismissed) this.dismissed = null;
@@ -988,6 +989,28 @@ export default class HerdrChat extends View {
     if (r.stdout.trim() !== "true") return;
     this.attachments.push(this.encode({ type: "image/png", path: rel }));
     cx.notify();
+  }
+
+  // Clipboard managers like Raycast paste an image as its file path.
+  pastedPath(cx) {
+    const v = this.input.value(), prev = this.lastValue ?? "";
+    this.lastValue = v;
+    if (v.length - prev.length < 5) return;
+    let a = 0, b = 0;
+    while (a < prev.length && prev[a] === v[a]) a++;
+    while (b < prev.length - a && prev[prev.length - 1 - b] === v[v.length - 1 - b]) b++;
+    const added = v.slice(a, v.length - b);
+    const m = added.trim().match(/^(?:file:\/\/)?(\/.+\.(\w+))$/);
+    if (!m || !MIME[m[2].toLowerCase()]) return;
+    const path = decodeURI(m[1]);
+    cx.spawn(async (cx) => {
+      if (!(await fs.exists(path).catch(() => false))) return;
+      const now = this.input.value();
+      const at = now.indexOf(added);
+      if (at < 0) return;
+      this.input.set_value(now.slice(0, at) + now.slice(at + added.length));
+      await this.drop([path], cx);
+    });
   }
 
   // The shell encodes faster than the mod's JavaScript, and meanwhile the thumbnail already shows.
