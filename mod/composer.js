@@ -129,12 +129,18 @@ export function composer(view, t) {
         .child(div().size(6).rounded(3).bg(machineColor(view.machine)))
         .child(div().child(view.machine ?? "this computer"))))
       .child(div().flex_1())
-      .when(view.vimOn(), (el) => el.child(div().px(6).text_size(11).font_semibold()
-        .text_color(view.vim.mode === "normal" ? t.accent : t.dim).child(view.vim.mode === "normal" ? "NORMAL" : "INSERT")))
+      .when(view.vimOn(), (el) => el.child(vimBadge(view.vim.mode, t)))
       .when(s.busy, (el) => el.child(h_flex().gap(6).px(6).items_center().text_size(11.5).text_color(t.working)
         .child(div().frames(["◐", "◓", "◑", "◒"], 120))
         .child(div().child(s.status ?? "Working"))))
       .child(meter(s, t)));
+}
+
+const VIM_MODES = { normal: ["NORMAL", "done"], insert: ["INSERT", "accent"], visual: ["VISUAL", "working"], vline: ["V-LINE", "working"] };
+
+function vimBadge(mode, t) {
+  const [label, color] = VIM_MODES[mode] ?? VIM_MODES.insert;
+  return div().px(7).py(1).rounded(5).bg(t[color]).text_color(t.background).text_size(11).font_semibold().child(label);
 }
 
 function commandList(view, t) {
