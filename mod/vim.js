@@ -113,14 +113,15 @@ function lines(t, i, n) {
   return [s, e];
 }
 
-// A small vim for one textarea: normal-mode keys come in, the new text and cursor go out.
+const caseFlip = (s, how) => [...s].map((ch) => (how === "u" ? ch.toLowerCase() : how === "U" ? ch.toUpperCase() : ch === ch.toUpperCase() ? ch.toLowerCase() : ch.toUpperCase())).join("");
+
+// A small vim for one textarea: keys come in, the new text, cursor and selection go out.
 export class Vim {
-  constructor() {
-    this.mode = "insert";
-    this.keys = "";
+  constructor(clip = null) {
+    this.clip = clip;
     this.reg = { text: "", line: false };
-    this.undos = [];
-    this.redos = [];
+    this.last = null;
+    this.reset();
   }
 
   reset() {
@@ -128,33 +129,134 @@ export class Vim {
     this.keys = "";
     this.undos = [];
     this.redos = [];
+    this.inserting = null;
   }
 
-  // Returns undefined to let the key through, else { text, at } with at being where the cursor goes.
+  // The clipboard is the register; a trailing newline marks it line-wise.
+  yank(text, line) {
+    this.reg = { text, line };
+    this.clip?.write(line ? `${text}\n` : text);
+  }
+
+  register() {
+    const s = this.clip?.read();
+    if (s == null || s === (this.reg.line ? `${this.reg.text}\n` : this.reg.text)) return this.reg;
+    return s.endsWith("\n") ? { text: s.slice(0, -1), line: true } : { text: s, line: false };
+  }
+
+  // Returns undefined to let the key through, else { text, at, sel? }.
   key(k, text, at) {
     if (this.mode === "insert") {
       if (k !== "escape") return undefined;
       this.mode = "normal";
+      this.endInsert(text);
       return { text, at: at > lineStart(text, at) ? at - 1 : at };
     }
+    const visual = this.mode === "visual" || this.mode === "vline";
     if (k === "escape") {
-      if (!this.keys) return undefined;
-      this.keys = "";
-      return { text, at };
+      if (this.keys) return (this.keys = "", this.show(text, visual ? this.head : at));
+      if (!visual) return undefined;
+      this.mode = "normal";
+      return { text, at: Math.min(this.head, lastChar(text, this.head)) };
     }
-    if (k.length > 1 && !["ctrl-r", "backspace", "space"].includes(k)) return this.keys ? (this.keys = "", { text, at }) : undefined;
-    const seq = this.keys + (k === "space" ? " " : k === "backspace" ? "h" : k === "ctrl-r" ? "\x12" : k);
-    const r = this.run(seq, text, at);
-    if (r === "more") return (this.keys = seq, { text, at });
+    const named = { space: " ", backspace: "h", left: "h", right: "l", up: "k", down: "j", "ctrl-r": "\x12" }[k];
+    if (k.length > 1 && !named) return this.keys ? (this.keys = "", this.show(text, visual ? this.head : at)) : visual ? this.show(text, this.head) : undefined;
+    const seq = this.keys + (named ?? k);
+    const r = visual ? this.visual(seq, text) : seq === "." ? this.repeat(text, at) : this.run(seq, text, at);
+    if (r === "more") return (this.keys = seq, this.show(text, visual ? this.head : at));
     this.keys = "";
-    if (!r) return { text, at };
-    if (r.text !== text && !r.undo) {
+    if (!r) return this.show(text, visual ? this.head : at);
+    if (r.visual) return this.show(text, this.head);
+    if ((r.text !== text || r.insert) && !r.undo) {
       this.undos.push({ text, at });
       this.redos = [];
+      if (!visual && seq !== ".") this.last = { keys: seq, insert: r.insert ? "" : null };
     }
-    if (r.insert) this.mode = "insert";
-    else r.at = Math.min(r.at, lastChar(r.text, r.at));
+    if (r.insert) {
+      this.mode = "insert";
+      this.inserting = { text: r.text, dot: !visual && seq !== "." };
+    } else {
+      this.mode = "normal";
+      r.at = Math.min(r.at, lastChar(r.text, r.at));
+    }
     return { text: r.text, at: r.at };
+  }
+
+  endInsert(text) {
+    const from = this.inserting;
+    this.inserting = null;
+    if (!from) return;
+    if (text === from.text && this.undos.at(-1)?.text === text) this.undos.pop();
+    let a = 0, b = 0;
+    while (a < text.length && text[a] === from.text[a]) a++;
+    while (b < text.length - a && b < from.text.length - a && text[text.length - 1 - b] === from.text[from.text.length - 1 - b]) b++;
+    if (from.dot && this.last) this.last.insert = text.slice(a, text.length - b);
+  }
+
+  repeat(t, i) {
+    if (!this.last) return null;
+    const r = this.run(this.last.keys, t, i);
+    if (!r || r === "more" || !r.insert) return r;
+    const ins = this.last.insert ?? "";
+    return { text: r.text.slice(0, r.at) + ins + r.text.slice(r.at), at: Math.max(r.at, r.at + ins.length - 1) };
+  }
+
+  show(text, at) {
+    if (this.mode === "visual" || this.mode === "vline") {
+      const [s, e] = this.range(text);
+      return { text, at: this.head, sel: { start: s, end: e } };
+    }
+    return { text, at };
+  }
+
+  range(t) {
+    const a = Math.min(this.anchor, this.head), b = Math.max(this.anchor, this.head);
+    return this.mode === "vline" ? [lineStart(t, a), lineEnd(t, b)] : [a, Math.min(b + 1, t.length)];
+  }
+
+  visual(keys, t) {
+    const m = keys.match(/^([1-9]\d*)?(.*)$/s);
+    const n = Number(m[1]) || 1, rest = m[2];
+    if (!rest || /^[ia]$/.test(rest) || /^[fFtTr]$/.test(rest) || rest === "g") return "more";
+    const h = this.head;
+    const obj = rest.match(/^([ia])(.)$/s);
+    if (obj) {
+      const r = object(t, h, obj[1] === "a", obj[2]);
+      if (r && r[1] > r[0]) { this.anchor = r[0]; this.head = r[1] - 1; }
+      return { visual: true };
+    }
+    const mo = rest.match(/^([fFtT])(.)$/s);
+    if (mo || /^(h|l|w|W|e|E|b|B|j|k|0|\^|\$|gg|G)$/.test(rest)) {
+      const p = motion(mo ? mo[1] : rest, t, h, n, mo?.[2]);
+      if (p !== null) this.head = Math.min(p, Math.max(0, t.length - 1));
+      return { visual: true };
+    }
+    const [s, e] = this.range(t);
+    const line = this.mode === "vline";
+    const edit = (ins, at = s) => ({ text: t.slice(0, s) + ins + t.slice(e), at });
+    switch (rest[0]) {
+      case "o": [this.anchor, this.head] = [this.head, this.anchor]; return { visual: true };
+      case "v": case "V": {
+        const to = rest === "v" ? "visual" : "vline";
+        if (this.mode === to) return { text: t, at: h };
+        this.mode = to;
+        return { visual: true };
+      }
+      case "d": case "x": return this.apply("d", t, s, e, line);
+      case "X": case "D": this.mode = "vline"; return this.apply("d", t, ...this.range(t), true);
+      case "c": case "s": return this.apply("c", t, s, e, line);
+      case "C": case "S": case "R": this.mode = "vline"; return this.apply("c", t, ...this.range(t), true);
+      case "y": return this.apply("y", t, s, e, line);
+      case "Y": this.mode = "vline"; return this.apply("y", t, ...this.range(t), true);
+      case "~": case "u": case "U": return edit(caseFlip(t.slice(s, e), rest[0]));
+      case "r": return rest.length > 1 ? edit(t.slice(s, e).replace(/[^\n]/g, rest[1])) : "more";
+      case "J": return edit(t.slice(s, e).replace(/\n[ \t]*/g, " "));
+      case "p": case "P": {
+        const r = this.register();
+        return edit(r.text, s + Math.max(0, r.text.length - 1));
+      }
+    }
+    return null;
   }
 
   run(keys, t, i) {
@@ -173,7 +275,7 @@ export class Vim {
         const r = object(t, i, obj[1] === "a", obj[2]);
         return r && this.apply(op, t, r[0], r[1], false);
       }
-      let mo = rest.match(/^([fFtT])(.)$/s);
+      const mo = rest.match(/^([fFtT])(.)$/s);
       let name = mo ? mo[1] : rest;
       if (op === "c" && (name === "w" || name === "W") && kind(t[i])) name = name === "w" ? "e" : "E";
       const p = motion(name, t, i, n, mo?.[2]);
@@ -182,7 +284,8 @@ export class Vim {
         const a = Math.min(i, p), b = Math.max(i, p);
         return this.apply(op, t, lineStart(t, a), lineEnd(t, b), true);
       }
-      let s = Math.min(i, p), e = Math.max(i, p) + (INCLUSIVE.has(name) || INCLUSIVE.has(name.toLowerCase()) ? 1 : 0);
+      const s = Math.min(i, p);
+      let e = Math.max(i, p) + (INCLUSIVE.has(name) || INCLUSIVE.has(name.toLowerCase()) ? 1 : 0);
       if (name === "w" || name === "W") e = Math.min(e, Math.max(lineEnd(t, i), i));
       return this.apply(op, t, s, Math.min(e, t.length), false);
     }
@@ -197,6 +300,10 @@ export class Vim {
       case "j": case "k": case "0": case "^": case "$": case "gg": case "G":
         return at(motion(rest, t, i, n) ?? i);
       case "f": case "F": case "t": case "T": return at(motion(c, t, i, n, rest[1]) ?? i);
+      case "v": case "V":
+        this.mode = c === "v" ? "visual" : "vline";
+        this.anchor = this.head = Math.min(i, Math.max(0, t.length - 1));
+        return { visual: true };
       case "i": return { text: t, at: i, insert: true };
       case "a": return { text: t, at: Math.min(i + 1, le), insert: true };
       case "I": return { text: t, at: motion("^", t, i, 1), insert: true };
@@ -213,8 +320,7 @@ export class Vim {
       case "r": return i + n <= le ? edit(i, i + n, rest[1].repeat(n), i + n - 1) : null;
       case "~": {
         const e = Math.min(i + n, le);
-        const flip = [...t.slice(i, e)].map((ch) => (ch === ch.toUpperCase() ? ch.toLowerCase() : ch.toUpperCase())).join("");
-        return edit(i, e, flip, Math.min(e, lastChar(t, i)));
+        return edit(i, e, caseFlip(t.slice(i, e)), Math.min(e, lastChar(t, i)));
       }
       case "J": {
         if (le >= t.length) return null;
@@ -223,9 +329,10 @@ export class Vim {
         return edit(le, e, t[e] === "\n" || e >= t.length ? "" : " ", le);
       }
       case "p": case "P": {
-        const s = this.reg.text.repeat(n);
+        const reg = this.register();
+        const s = reg.text.repeat(n);
         if (!s) return null;
-        if (this.reg.line) {
+        if (reg.line) {
           if (c === "p") return le >= t.length ? edit(le, le, `\n${s}`, le + 1) : edit(le + 1, le + 1, `${s}\n`, le + 1);
           return edit(ls, ls, `${s}\n`, ls);
         }
@@ -250,7 +357,7 @@ export class Vim {
 
   // Line-wise ranges run from the first line's start to the last line's end, without its newline.
   apply(op, t, s, e, line) {
-    this.reg = { text: t.slice(s, e), line };
+    this.yank(t.slice(s, e), line);
     if (op === "y") return { text: t, at: s };
     if (op === "c") return { text: t.slice(0, s) + t.slice(e), at: s, insert: true };
     if (!line) return { text: t.slice(0, s) + t.slice(e), at: s };
