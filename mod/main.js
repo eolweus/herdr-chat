@@ -20,6 +20,7 @@ import { FileLinks, openFile } from "./filelinks.js";
 import { SidePanel } from "./side.js";
 import { bodyOf, splitQuotes, withQuotes } from "./quote.js";
 import { Find } from "./find.js";
+import { Since, sinceCard } from "./since.js";
 
 const DATA = "data/herdr-chat";
 const VIEW_MS = 800;
@@ -46,6 +47,7 @@ const uuid = () => "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) =
 });
 // Space kept above per message not yet loaded, until real row heights are known.
 const ROW_GUESS = 60;
+const windowActive = () => { try { return window.is_window_active(); } catch { return true; } };
 const olderCount = (older) => (typeof older === "number" ? older : older ? 100 : 0);
 const safe = (s) => s.replace(/[^A-Za-z0-9_-]/g, "_");
 const tilde = (path, h) => (h && path?.startsWith(h) ? `~${path.slice(h.length)}` : path ?? "");
@@ -98,6 +100,8 @@ export default class HerdrChat extends View {
     if (p.draft) this.setDraft(p.draft);
     this.pickId = null;
     this.resumeId = p.resume ?? null;
+    this.since = new Since();
+    this.fakeAway = typeof p.since === "number" ? p.since : null;
     this.commandAt = 0;
     this.handle = cx.focus_handle();
     this.input.focus();
@@ -120,6 +124,17 @@ export default class HerdrChat extends View {
       if (shown && !this.shown) this.claimUntil = Date.now() + 1000;
       if (shown && (this.handle.is_focused() || (Date.now() < this.claimUntil && !this.side.focused && !this.quoteFocused))) this.input.focus();
       this.shown = shown;
+      if (this.fakeAway && this.items.length > 2 && !this.state.busy) {
+        const at = this.items.findLastIndex((i) => i.kind === "user");
+        this.since.left = { at: Date.now() - this.fakeAway, ids: new Set(this.items.slice(0, Math.max(1, at + 1)).map((i) => i.id)) };
+        this.since.here = false;
+        this.fakeAway = null;
+      }
+      const back = this.since.tick(shown && windowActive(), this.items);
+      if (back) {
+        if (this.items.some((i) => back.ids.has(i.id) && i.kind === "text")) { back.asked = uuid(); this.send({ type: "summarize", id: back.asked, from: back.from }); }
+        cx.notify();
+      }
       // The engine starts a stopped chat's CLI once it has been looked at for a moment, and keeps it while it is.
       const viewing = shown && Date.now() - this.shownSince >= VIEW_MS;
       if (viewing !== this.viewing) { this.viewing = viewing; this.send({ type: "view", on: viewing }); }
@@ -438,6 +453,7 @@ export default class HerdrChat extends View {
       await fs.writeFile(`${appHome()}/${rel}`, Buffer.from(m.data, "base64")).then(() => this.images.set(`${m.item}:${m.i}`, rel), () => {});
     } else if (m.type === "sessions") this.recent = m.sessions;
     else if (m.type === "rewind_check" && this.confirm?.id === m.id) this.confirm.files = m.files;
+    else if (m.type === "summary" && this.since.card?.asked === m.id) Object.assign(this.since.card, m.error ? { error: m.error } : { summary: m.text || null });
     else if (m.type === "forked" && this.forking?.id === m.id) {
       const draft = this.forking.text;
       this.forking = null;
@@ -771,6 +787,7 @@ export default class HerdrChat extends View {
       this.state = { ...this.state, busy: true };
     }
     this.send({ type: "prompt", id, text, images, priority });
+    this.since.hide();
     this.following = true;
     this.stick = true;
   }
@@ -1183,6 +1200,15 @@ export default class HerdrChat extends View {
     this.findMark = { top: Math.max(0, top - 80), h: Math.max(100, (this.viewH ?? 600) / zoom), n: (this.findMark?.n ?? 0) + 1, ready: false, done: false };
   }
 
+  jumpBack(cx) {
+    const ids = this.since.card?.ids;
+    const has = (b) => ids?.has(b.id) || ids?.has(b.item?.id) || b.items?.some((i) => ids?.has(i.id));
+    const block = (this.lastShown ?? []).find(has);
+    if (block) this.scrollToRow(block.id);
+    this.since.hide();
+    cx.notify();
+  }
+
   jump(cx) {
     this.following = true;
     this.stick = true;
@@ -1303,9 +1329,13 @@ export default class HerdrChat extends View {
         .child(shown.length ? div().relative().flex_1().min_h(0).flex().flex_col()
           .child(transcript)
           .when(this.find.open, (el) => el.child(this.find.render(t)))
-          .when(!this.following, (el) => el.child(div().absolute().bottom(10).w_full().flex().justify_center()
-            .child(div().id("jump").px(12).py(5).rounded(14).bg(t.raised).border_1().border_color(t.border)
-              .text_size(12).cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.jump(cx)).child("↓ Latest"))))
+          .when(!this.following || Boolean(this.since.card), (el) => el.child(v_flex().absolute().bottom(10).w_full().px(16).gap(8).items_center()
+            .when(!this.following, (el) => el.child(div().id("jump").px(12).py(5).rounded(14).bg(t.raised).border_1().border_color(t.border)
+              .text_size(12).cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.jump(cx)).child("↓ Latest")))
+            .when(Boolean(this.since.card), (el) => el.child(sinceCard(this.since.card, this.items, this.state.busy, t, {
+              onJump: (cx) => this.jumpBack(cx),
+              onHide: (cx) => { this.since.hide(); cx.notify(); },
+            })))))
           : this.empty(t))
         .child(h_flex().w_full().justify_center().flex_none().child(composer(this, t))))
       .when(Boolean(this.side?.open), (el) => el.child(this.side.render(t)))
