@@ -21,6 +21,7 @@ import { SidePanel } from "./side.js";
 import { bodyOf, splitQuotes, withQuotes } from "./quote.js";
 import { Find } from "./find.js";
 import { Since, sinceCard } from "./since.js";
+import { Inbox } from "./inbox.js";
 
 const DATA = "data/herdr-chat";
 const VIEW_MS = 800;
@@ -57,6 +58,7 @@ export default class HerdrChat extends View {
     const p = props() ?? {};
     if (p.viewer) return void (this.other = new Viewer(p, cx));
     if (p.panel) return void (this.other = new Panel(cx));
+    if (p.inbox) return void (this.other = new Inbox(cx));
     if (p.file) return void (this.other = new FileView(p, cx));
     if (p.mcp) return void (this.other = new McpDialog(p.mcp, cx));
     this.key = p.key ?? null;
