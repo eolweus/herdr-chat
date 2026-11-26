@@ -5,7 +5,7 @@ import { WebSocket } from "websocket";
 import * as fs from "fs/promises";
 import { Buffer } from "buffer";
 import { CodeCache } from "./markdown.js";
-import { userRow, textRow, thinkingRow, toolRow, noticeRow, endRow, groupRow } from "./rows.js";
+import { agentMessages, userRow, textRow, thinkingRow, toolRow, noticeRow, endRow, groupRow } from "./rows.js";
 import { Viewer } from "./viewer.js";
 import { Panel } from "./panel.js";
 import { FileView } from "./fileview.js";
@@ -515,6 +515,7 @@ export default class HerdrChat extends View {
     this.byId.set(item.id, item);
     const t = theme();
     if (item.kind === "text") this.codes.prepareText(item.id, item.text, t);
+    if (item.kind === "user") agentMessages(item.text)?.forEach((m, i) => this.codes.prepareText(`${item.id}:agent${i}`, m.body, t));
     if (item.kind === "permission") {
       if (item.detail) this.codes.prepare(`detail:${item.id}`, this.detailLang(item.tool), item.detail, t);
       if (item.plan) this.codes.prepareText(item.id, item.plan, t);

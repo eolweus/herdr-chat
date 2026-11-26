@@ -60,7 +60,39 @@ function rewindConfirm(c, t, view) {
       .child(btn("rewind-go", c.edit ? "Edit" : "Rewind", true, (_e, cx) => view.rewind(cx))));
 }
 
+const AGENT_MSG = /<agent-message from="([^"]*)">\n?([\s\S]*?)(?:<\/agent-message>|$)/g;
+
+export function agentMessages(text) {
+  if (!text?.includes("<agent-message from=")) return null;
+  return [...text.matchAll(AGENT_MSG)].map(([, from, raw]) => {
+    const handback = raw.startsWith("[Subagent hand-back]");
+    const follows = raw.indexOf("follows:\n");
+    const body = (handback && follows >= 0 ? raw.slice(follows + 9) : raw).replace(/^ {2}/gm, "").trim();
+    const first = body.split("\n").find((l) => l.trim()) ?? "";
+    const rest = /^#/.test(first) ? body.slice(body.indexOf(first) + first.length).trim() : body;
+    return { from, body: rest, label: handback ? "Subagent reported back" : "Agent sent a message", title: first.replace(/^#+\s*|[*`_]/g, "").trim() };
+  });
+}
+
+function agentRow(item, msgs, t, view) {
+  return row().py(4).gap(4).children(msgs.map((m, i) => {
+    const id = `${item.id}:agent${i}`;
+    const open = view.expanded.has(id);
+    return v_flex().w_full()
+      .child(h_flex().id(`agent-${id}`).gap(8).items_center().text_size(13).min_w(0).cursor_pointer()
+        .on_click((_e, cx) => view.toggle(id, cx))
+        .child(div().w(14).flex_none().text_color(t.accent).child("↩"))
+        .child(div().flex_none().font_semibold().text_color(t.foreground).child(m.label))
+        .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(m.title))
+        .child(div().flex_none().text_size(11).text_color(t.dim).child(open ? "▾" : "▸")))
+      .when(open, (el) => el.child(div().mt(6).ml(22).pl(12).border_l_2().border_color(t.border)
+        .child(markdown(id, m.body || " ", t, view.codes, { links: view.links, onLink: (href, cx) => view.openLink(href, cx), onCopy: (cid, code, cx) => view.copyText(cid, code, cx), copied: view.copied }))));
+  }));
+}
+
 export function userRow(item, t, view) {
+  const msgs = agentMessages(item.text);
+  if (msgs?.length) return agentRow(item, msgs, t, view);
   const c = view.confirm?.id === item.id ? view.confirm : null;
   const { quotes, body } = splitQuotes(item.text);
   return row().id(`user-${item.id}`).items_end().pt(10).pb(2)
