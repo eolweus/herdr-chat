@@ -9,6 +9,7 @@ import { refreshLimits } from "./src/limits";
 import { refreshGemini } from "./src/agy-cache";
 import { projectServers } from "./src/projects";
 import { processes } from "./src/memory";
+import { summarize } from "./src/summary";
 
 const PROTOCOL = 3;
 const HOME = process.env.HOME!;
@@ -169,6 +170,12 @@ async function handle(ws: ServerWebSocket<Data>, m: Record<string, any>) {
     case "side_ask": return s.askSide(String(m.text ?? ""));
     case "side_interrupt": return s.side?.interrupt();
     case "side_close": return s.closeSide();
+    case "summarize": {
+      const id = String(m.id);
+      return summarize(s.n.items, String(m.from))
+        .then((text) => ws.send(JSON.stringify({ type: "summary", id, text })))
+        .catch((e) => ws.send(JSON.stringify({ type: "summary", id, error: e?.message ?? String(e) })));
+    }
     case "view": return s.view(d.client, Boolean(m.on));
     case "answer": return s.answer(m as any);
     case "set": {
