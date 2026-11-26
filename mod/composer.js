@@ -136,7 +136,8 @@ export function composer(view, t) {
       .child(meter(s, t)));
 }
 
-const VIM_MODES = { normal: ["NORMAL", "done"], insert: ["INSERT", "accent"], visual: ["VISUAL", "working"], vline: ["V-LINE", "working"] };
+// ANSI colors, since the semantic ones can sit close together in a theme.
+const VIM_MODES = { normal: ["NORMAL", "ansi2"], insert: ["INSERT", "ansi4"], visual: ["VISUAL", "ansi5"], vline: ["V-LINE", "ansi5"] };
 
 function vimBadge(mode, t) {
   const [label, color] = VIM_MODES[mode] ?? VIM_MODES.insert;
