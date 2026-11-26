@@ -476,7 +476,17 @@ export default class HerdrChat extends View {
 
   checkReload() {
     const r = shared("herdr-chat:reload");
-    if (r?.at > (this.born ?? 0) && this.pane && !this.reloading && (r.machine === "all" || r.machine === (this.machine ?? null))) { this.reloading = true; this.reload(false); }
+    if (!(r?.at > (this.born ?? 0)) || this.reloading || (r.machine !== "all" && r.machine !== (this.machine ?? null))) return;
+    if (this.pane) { this.reloading = true; return this.reload(false); }
+    this.softReload();
+  }
+
+  // A chat that was never focused doesn't know its pane, so it can't be replaced; this redoes what init set up instead.
+  softReload() {
+    this.born = Date.now();
+    const draft = this.input.value();
+    this.makeInput(this.placeholder);
+    if (draft) this.setDraft(draft);
   }
 
   // A saved mod file reloads panes in place but skips init and keeps the old snapshot; a fresh pane runs both.
