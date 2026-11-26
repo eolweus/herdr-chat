@@ -107,6 +107,7 @@ export default class HerdrChat extends View {
     this.since = new Since();
     this.vim = new Vim({ read: () => this.cx?.read_from_clipboard(), write: (s) => this.cx?.write_to_clipboard(s) });
     this.fakeAway = typeof p.since === "number" ? p.since : null;
+    this.sinceTest = this.fakeAway !== null;
     this.commandAt = 0;
     this.handle = cx.focus_handle();
     this.input.focus();
@@ -130,13 +131,14 @@ export default class HerdrChat extends View {
       if (shown && (this.handle.is_focused() || (Date.now() < this.claimUntil && !this.side.focused && !this.quoteFocused))) this.input.focus();
       this.shown = shown;
       if (this.fakeAway && this.items.length > 2 && !this.state.busy) {
-        const at = this.items.findLastIndex((i) => i.kind === "user");
+        const at = this.items.findIndex((i) => i.kind === "user");
         this.since.left = { at: Date.now() - this.fakeAway, ids: new Set(this.items.slice(0, Math.max(1, at + 1)).map((i) => i.id)) };
         this.since.here = false;
         this.fakeAway = null;
       }
-      const back = this.since.tick(shown && windowActive(), this.items);
-      if (back) {
+      const back = this.since.tick(shown && (windowActive() || this.sinceTest), this.items);
+      if (back && !this.sinceOn()) this.since.hide();
+      else if (back) {
         back.asked = uuid();
         this.send({ type: "summarize", id: back.asked, from: back.from });
         cx.notify();
@@ -678,7 +680,7 @@ export default class HerdrChat extends View {
     const tok = this.slashToken();
     if (!tok || tok.start === this.dismissed) return [];
     const q = tok.q.toLowerCase();
-    const all = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp" && c.name !== "btw" && c.name !== "model"), { name: "model", description: "Switch model, or agent (Claude or Antigravity) before the first message", hint: "[model]" }, { name: "btw", description: "Ask on the side, in a read-only copy of this chat that doesn't interrupt it or end up in it (Cmd-;)", hint: "[question]" }, { name: "mcp", description: "Manage MCP servers", hint: "" }, { name: "restart-engine", description: "Restart a machine's chat engine, copying the code there first if it's remote (stops running turns)", hint: "[machine]" }, { name: "vim", description: `Turn vim keys in this box ${this.vimOn() ? "off" : "on"}`, hint: "" }, { name: "reload", description: "Reopen this chat in the same pane so it picks up new herdr-chat code", hint: "" }, { name: "move", description: "Move this chat to another machine: the conversation continues there and this pane closes", hint: "<machine> [folder] [--force]" }];
+    const all = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp" && c.name !== "btw" && c.name !== "model"), { name: "model", description: "Switch model, or agent (Claude or Antigravity) before the first message", hint: "[model]" }, { name: "btw", description: "Ask on the side, in a read-only copy of this chat that doesn't interrupt it or end up in it (Cmd-;)", hint: "[question]" }, { name: "mcp", description: "Manage MCP servers", hint: "" }, { name: "restart-engine", description: "Restart a machine's chat engine, copying the code there first if it's remote (stops running turns)", hint: "[machine]" }, { name: "since", description: `Turn the "Since you left" catch-up ${this.sinceOn() ? "off" : "on"} in all chats`, hint: "" }, { name: "vim", description: `Turn vim keys in this box ${this.vimOn() ? "off" : "on"}`, hint: "" }, { name: "reload", description: "Reopen this chat in the same pane so it picks up new herdr-chat code", hint: "" }, { name: "move", description: "Move this chat to another machine: the conversation continues there and this pane closes", hint: "<machine> [folder] [--force]" }];
     const ours = ["btw", "mcp", "move"];
     const list = this.claudeOnly() ? all : all.filter((c) => !ours.includes(c.name) || (this.state.commands ?? []).some((x) => x.name === c.name));
     const starts = list.filter((c) => c.name.toLowerCase().startsWith(q));
@@ -738,6 +740,10 @@ export default class HerdrChat extends View {
     if (btw) {
       this.input.set_value("");
       return btw[1]?.trim() ? this.side.ask(btw[1], cx) : this.side.show(cx);
+    }
+    if (text === "/since") {
+      this.input.set_value("");
+      return this.setSince(!this.sinceOn(), cx);
     }
     if (text === "/vim") {
       this.input.set_value("");
@@ -1145,6 +1151,17 @@ export default class HerdrChat extends View {
     ]);
   }
 
+  sinceOn() {
+    return shared("herdr-chat:since-off") !== true;
+  }
+
+  setSince(on, cx) {
+    setShared("herdr-chat:since-off", !on);
+    if (!on) this.since.hide();
+    cx?.notify();
+    notify({ title: on ? "Catch-up on" : "Catch-up off", body: on ? "" : "No more \"Since you left\" summaries in any chat. /since turns them back on." });
+  }
+
   vimOn() {
     return shared("herdr-chat:vim") === true;
   }
@@ -1235,7 +1252,6 @@ export default class HerdrChat extends View {
     const has = (b) => ids?.has(b.id) || ids?.has(b.item?.id) || b.items?.some((i) => ids?.has(i.id));
     const block = (this.lastShown ?? []).find(has);
     if (block) this.scrollToRow(block.id);
-    this.since.hide();
     cx.notify();
   }
 
@@ -1334,6 +1350,12 @@ export default class HerdrChat extends View {
         .children(shown.map((i) => v_flex().id(`row-${i.id}`).w_full().items_center()
           .on_size_change((size) => this.heights.set(i.id, size.height))
           .child(this.renderItem(i, t, children).max_w(880))))
+        .when(Boolean(this.since.card), (el) => el.child(v_flex().id("since-row").w_full().items_center().px(16).pt(4).pb(12)
+          .child(sinceCard(this.since.card, this.items, this.state.busy, t, {
+            onJump: (cx) => this.jumpBack(cx),
+            onHide: (cx) => { this.since.hide(); cx.notify(); },
+            onOff: (cx) => this.setSince(false, cx),
+          }))))
         .when(Boolean(staged), (el) => el.child(v_flex().id("staged").absolute().top(0).left(0).right(0).items_center().invisible()
           .on_size_change((size, cx) => this.commitOlder(size.height, cx))
           .children((staged ?? []).map((i) => this.renderItem(i, t, children).max_w(880))))))
@@ -1368,13 +1390,9 @@ export default class HerdrChat extends View {
         .child(shown.length ? div().relative().flex_1().min_h(0).flex().flex_col()
           .child(transcript)
           .when(this.find.open, (el) => el.child(this.find.render(t)))
-          .when(!this.following || Boolean(this.since.card), (el) => el.child(v_flex().absolute().bottom(10).w_full().px(16).gap(8).items_center()
-            .when(!this.following, (el) => el.child(div().id("jump").px(12).py(5).rounded(14).bg(t.raised).border_1().border_color(t.border)
-              .text_size(12).cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.jump(cx)).child("↓ Latest")))
-            .when(Boolean(this.since.card), (el) => el.child(sinceCard(this.since.card, this.items, this.state.busy, t, {
-              onJump: (cx) => this.jumpBack(cx),
-              onHide: (cx) => { this.since.hide(); cx.notify(); },
-            })))))
+          .when(!this.following, (el) => el.child(v_flex().absolute().bottom(10).w_full().px(16).items_center()
+            .child(div().id("jump").px(12).py(5).rounded(14).bg(t.raised).border_1().border_color(t.border)
+              .text_size(12).cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.jump(cx)).child("↓ Latest"))))
           : this.empty(t))
         .child(h_flex().w_full().justify_center().flex_none().child(composer(this, t))))
       .when(Boolean(this.side?.open), (el) => el.child(this.side.render(t)))
