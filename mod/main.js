@@ -122,47 +122,11 @@ export default class HerdrChat extends View {
     cx.timer.after(400, () => this.findPane());
     if (checking()) return;
     // Herdr only sends "focus" for pane.go, not for clicks, tab switches or pane.focus.
-    cx.timer.every(200, (cx) => {
-      // A new chat's input takes focus before its pane exists, so the pane is looked up once it does.
-      if (!this.pane) this.findPane();
-      this.checkReload();
-      if (this.links.pending.size) cx.spawn(async (cx) => { if (await this.links.check(this.cwd, this.machine)) cx.notify(); });
-      const shown = this.visible();
-      this.shownSince = shown ? this.shownSince ?? Date.now() : null;
-      if (shown && !this.shown) this.claimUntil = Date.now() + 1000;
-      if (shown && (this.handle.is_focused() || (Date.now() < this.claimUntil && !this.side.focused && !this.quoteFocused))) this.input.focus();
-      this.shown = shown;
-      if (this.fakeAway && this.items.length > 2 && !this.state.busy) {
-        const at = this.items.findIndex((i) => i.kind === "user");
-        this.since.left = { at: Date.now() - this.fakeAway, ids: new Set(this.items.slice(0, Math.max(1, at + 1)).map((i) => i.id)) };
-        this.since.here = false;
-        this.fakeAway = null;
-      }
-      const back = this.since.tick(shown && (windowActive() || this.sinceTest), this.items);
-      if (back && !this.sinceOn()) this.since.hide();
-      else if (back) {
-        back.asked = uuid();
-        this.send({ type: "summarize", id: back.asked, from: back.from });
-        cx.notify();
-      }
-      // The engine starts a stopped chat's CLI once it has been looked at for a moment, and keeps it while it is.
-      const viewing = shown && Date.now() - this.shownSince >= VIEW_MS;
-      if (viewing !== this.viewing) { this.viewing = viewing; this.send({ type: "view", on: viewing }); }
-      this.pageAndImages(cx);
-    });
+    cx.timer.every(200, (cx) => this.tick(cx));
     cx.spawn(async (cx) => this.connect(cx));
     cx.spawn(async (cx) => {
       for (;;) {
-        const c = await nextCommand();
-        // Herdr says "focus" (popup closed, pane.go) and hands over the pane before the keyboard, so keep claiming it briefly.
-        if (c === "focus" && (!this.pane || this.visible())) { this.input.focus(); this.claimUntil = Date.now() + 1000; }
-        else if (c === "edit" && this.pane && focused()?.pane === this.pane) this.editDraft(cx).catch((e) => { this.editor = null; notify({ title: "Couldn't open the editor", body: String(e?.message ?? e), level: "error" }); });
-        else if (c === "remote" && this.active()) this.setRemote(!this.state.remote, cx);
-        else if (c === "compact" && this.active()) this.send({ type: "prompt", text: "/compact", images: [] });
-        else if (c === "mcp" && this.active() && this.claudeOnly()) this.openMcp(null);
-        else if (c === "reload" && (this.findPane(), this.pane && focused()?.pane === this.pane)) this.reload();
-        else if (c === "find" && (this.findPane(), this.pane && focused()?.pane === this.pane)) this.find.show(cx);
-        else if (c === "signin" && shared("herdr-chat:signin")?.key === this.key) this.signIn(shared("herdr-chat:signin").server);
+        this.onCommand(await nextCommand(), cx);
         cx.notify();
       }
     });
@@ -180,14 +144,7 @@ export default class HerdrChat extends View {
     this.input.set_auto_grow(1, 12);
     this.input.on("submit", (e, cx) => this.enter(e, cx));
     this.input.on("paste_other", (_e, cx) => cx.spawn(async (cx) => this.pasteImage(cx)));
-    this.input.on("change", (_e, cx) => {
-      this.pastedPath(cx);
-      if (!this.input.value()) this.vim.reset();
-      this.commandAt = 0;
-      if (this.slashToken()?.start !== this.dismissed) this.dismissed = null;
-      this.renameInput();
-      cx.notify();
-    });
+    this.input.on("change", (_e, cx) => this.onChange(cx));
     this.input.on("focus", (_e, cx) => { this.bindVim(cx); this.focusedInput = true; this.findPane(); cx.notify(); });
     this.input.on("blur", (_e, cx) => { this.focusedInput = false; cx.notify(); });
     if (old) {
@@ -474,6 +431,47 @@ export default class HerdrChat extends View {
       run("pane.split", { direction: "right", mod: "herdr-chat", props: { key: m.key, machine: this.machine, cwd: m.cwd, draft, ...(props()?.engine ? { engine: props().engine } : {}) } });
     }
     else if (m.type === "upsert") { this.liveAt = Date.now(); await this.upsert(m.item, true); }
+  }
+
+  tick(cx) {
+    // A new chat's input takes focus before its pane exists, so the pane is looked up once it does.
+    if (!this.pane) this.findPane();
+    this.checkReload();
+    if (this.links.pending.size) cx.spawn(async (cx) => { if (await this.links.check(this.cwd, this.machine)) cx.notify(); });
+    const shown = this.visible();
+    this.shownSince = shown ? this.shownSince ?? Date.now() : null;
+    if (shown && !this.shown) this.claimUntil = Date.now() + 1000;
+    if (shown && (this.handle.is_focused() || (Date.now() < this.claimUntil && !this.side.focused && !this.quoteFocused))) this.input.focus();
+    this.shown = shown;
+    if (this.fakeAway && this.items.length > 2 && !this.state.busy) {
+      const at = this.items.findIndex((i) => i.kind === "user");
+      this.since.left = { at: Date.now() - this.fakeAway, ids: new Set(this.items.slice(0, Math.max(1, at + 1)).map((i) => i.id)) };
+      this.since.here = false;
+      this.fakeAway = null;
+    }
+    const back = this.since.tick(shown && (windowActive() || this.sinceTest), this.items);
+    if (back && !this.sinceOn()) this.since.hide();
+    else if (back) {
+      back.asked = uuid();
+      this.send({ type: "summarize", id: back.asked, from: back.from });
+      cx.notify();
+    }
+    // The engine starts a stopped chat's CLI once it has been looked at for a moment, and keeps it while it is.
+    const viewing = shown && Date.now() - this.shownSince >= VIEW_MS;
+    if (viewing !== this.viewing) { this.viewing = viewing; this.send({ type: "view", on: viewing }); }
+    this.pageAndImages(cx);
+  }
+
+  onCommand(c, cx) {
+    // Herdr says "focus" (popup closed, pane.go) and hands over the pane before the keyboard, so keep claiming it briefly.
+    if (c === "focus" && (!this.pane || this.visible())) { this.input.focus(); this.claimUntil = Date.now() + 1000; }
+    else if (c === "edit" && this.pane && focused()?.pane === this.pane) this.editDraft(cx).catch((e) => { this.editor = null; notify({ title: "Couldn't open the editor", body: String(e?.message ?? e), level: "error" }); });
+    else if (c === "remote" && this.active()) this.setRemote(!this.state.remote, cx);
+    else if (c === "compact" && this.active()) this.send({ type: "prompt", text: "/compact", images: [] });
+    else if (c === "mcp" && this.active() && this.claudeOnly()) this.openMcp(null);
+    else if (c === "reload" && (this.findPane(), this.pane && focused()?.pane === this.pane)) this.reload();
+    else if (c === "find" && (this.findPane(), this.pane && focused()?.pane === this.pane)) this.find.show(cx);
+    else if (c === "signin" && shared("herdr-chat:signin")?.key === this.key) this.signIn(shared("herdr-chat:signin").server);
   }
 
   checkReload() {
@@ -988,6 +986,15 @@ export default class HerdrChat extends View {
     const r = await exec("osascript", ["-l", "JavaScript", "-e", PASTE, abs]);
     if (r.stdout.trim() !== "true") return;
     this.attachments.push(this.encode({ type: "image/png", path: rel }));
+    cx.notify();
+  }
+
+  onChange(cx) {
+    this.pastedPath(cx);
+    if (!this.input.value()) this.vim.reset();
+    this.commandAt = 0;
+    if (this.slashToken()?.start !== this.dismissed) this.dismissed = null;
+    this.renameInput();
     cx.notify();
   }
 
