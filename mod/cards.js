@@ -1,5 +1,5 @@
 import { div } from "gpui-kit";
-import { v_flex, h_flex, Input } from "gpui-base";
+import { v_flex, h_flex, Input, InputState } from "gpui-base";
 import { codeBlock, diffBlock, markdown } from "./markdown.js";
 
 function button(id, label, t, kind, fn) {
@@ -95,3 +95,53 @@ export function questionCard(item, t, view) {
       .child(div().flex_1())
       .child(button(`skip-${item.id}`, "Skip", t, "", (_e, cx) => view.answer({ item: item.id, answers: null }, cx))))));
 }
+
+// Answering question cards; hosts provide answer(a, cx) and the picks, qPage and otherInputs maps.
+export const questionMethods = {
+  prepareQuestion(item) {
+    const inputs = item.questions.map((q) => {
+      const s = InputState.new({ placeholder: "Something else…" });
+      s.on("submit", (_e, cx) => {
+        const qi = item.questions.indexOf(q);
+        if (item.questions.length === 1 && !q.multiSelect && s.value().trim()) this.answer({ item: item.id, answers: { [q.question]: s.value().trim() } }, cx);
+        else if (qi < item.questions.length - 1) this.goQuestion(item, qi + 1, cx);
+        else this.submitQuestion(item, cx);
+      });
+      return s;
+    });
+    this.otherInputs.set(item.id, inputs);
+  },
+
+  pick(item, q, label, single, cx) {
+    if (single) return this.answer({ item: item.id, answers: { [q.question]: label } }, cx);
+    const picks = this.picks.get(item.id) ?? {};
+    const set = picks[q.question] ?? new Set();
+    if (q.multiSelect) set.has(label) ? set.delete(label) : set.add(label);
+    else { set.clear(); set.add(label); }
+    picks[q.question] = set;
+    this.picks.set(item.id, picks);
+    const qi = item.questions.indexOf(q);
+    if (!q.multiSelect && qi < item.questions.length - 1) return this.goQuestion(item, qi + 1, cx);
+    cx.notify();
+  },
+
+  goQuestion(item, page, cx) {
+    this.qPage.set(item.id, Math.max(0, Math.min(page, item.questions.length - 1)));
+    cx.notify();
+  },
+
+  submitQuestion(item, cx) {
+    const picks = this.picks.get(item.id) ?? {};
+    const inputs = this.otherInputs.get(item.id) ?? [];
+    const answers = {};
+    item.questions.forEach((q, i) => {
+      const parts = [...(picks[q.question] ?? [])];
+      const other = inputs[i]?.value().trim();
+      if (other) parts.push(other);
+      if (parts.length) answers[q.question] = parts.join(", ");
+    });
+    const missing = item.questions.findIndex((q) => !answers[q.question]);
+    if (missing >= 0) return this.goQuestion(item, missing, cx);
+    this.answer({ item: item.id, answers }, cx);
+  },
+};
