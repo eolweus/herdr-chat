@@ -67,12 +67,6 @@ export default class HerdrChat extends View {
     // The input's own up/down bindings sit deeper than this view, so the list's keys are bound inside it too.
     cx.bind_keys([["tab", "herdr-chat-complete"], ["enter", "herdr-chat-complete"], ["up", "herdr-chat-up"], ["down", "herdr-chat-down"], ["ctrl-k", "herdr-chat-up"], ["ctrl-j", "herdr-chat-down"]]
       .flatMap(([keystroke, action]) => ["HerdrChatCommands", "HerdrChatCommands > Input"].map((context) => ({ keystroke, action, context }))));
-    // The textarea's own bindings for these run before any key_down listener, so vim takes them first.
-    cx.bind_keys([
-      ...["HerdrChatVim", "HerdrChatVimNormal"].map((c) => ({ keystroke: "escape", action: "herdr-chat-vim-escape", context: `${c} > Input` })),
-      ...[["backspace", "backspace"], ["left", "left"], ["right", "right"], ["up", "up"], ["down", "down"], ["enter", "enter"], ["cmd-enter", "cmd-enter"]]
-        .map(([keystroke, k]) => ({ keystroke, action: `herdr-chat-vim-${k}`, context: "HerdrChatVimNormal > Input" })),
-    ]);
     this.machine = p.machine || null;
     this.cwd = p.cwd ?? focused()?.cwd ?? null;
     this.items = [];
@@ -188,7 +182,7 @@ export default class HerdrChat extends View {
       this.renameInput();
       cx.notify();
     });
-    this.input.on("focus", (_e, cx) => { this.focusedInput = true; this.findPane(); cx.notify(); });
+    this.input.on("focus", (_e, cx) => { this.bindVim(cx); this.focusedInput = true; this.findPane(); cx.notify(); });
     this.input.on("blur", (_e, cx) => { this.focusedInput = false; cx.notify(); });
     if (old) {
       if (this.focusedInput) this.input.focus();
@@ -1136,6 +1130,16 @@ export default class HerdrChat extends View {
     else if (e.keystroke === "shift-tab") this.cycleMode(cx);
     else return;
     cx.stop_propagation();
+  }
+
+  // The textarea's own bindings run before key_down, and the newest binding wins, so these go in once it exists.
+  bindVim(cx) {
+    if (this.vimBound === this.input) return;
+    this.vimBound = this.input;
+    cx.bind_keys([
+      ...["HerdrChatVim", "HerdrChatVimNormal"].map((c) => ({ keystroke: "escape", action: "herdr-chat-vim-escape", context: `${c} > Input` })),
+      ...["backspace", "left", "right", "up", "down", "enter", "cmd-enter"].map((k) => ({ keystroke: k, action: `herdr-chat-vim-${k}`, context: "HerdrChatVimNormal > Input" })),
+    ]);
   }
 
   vimOn() {
