@@ -706,6 +706,7 @@ export default class HerdrChat extends View {
   }
 
   setDraft(text) {
+    this.lastValue = text;
     this.input.set_value(text);
     this.input.set_selected_range({ start: text.length, end: text.length });
   }
