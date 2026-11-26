@@ -6,13 +6,18 @@ const MAX_CHARS = 40_000;
 
 const BUSY = `The agent is still working: the NOW line says what it is doing right now.`;
 
-const PROMPT = `Below is what happened in a coding agent's chat while the user was away. Write them a catch-up in exactly this format, plain text with no markdown or backticks:
+const PROMPT = `Below is what happened in a coding agent's chat while the user was away. Write them a terse catch-up in exactly this format:
 
-NOW: one short sentence on where things stand.
-- one short line per notable change or outcome, 2 to 5 of them, naming concrete files, commands and results
-NEEDS: one short sentence on what needs their decision or attention, or leave this line out if nothing does.
+NOW: where things stand, at most 10 words.
+- one outcome per line, 1 to 3 lines, at most 10 words each
+NEEDS: what needs their decision, at most 10 words, or leave this line out if nothing does.
 
-Don't greet or speculate beyond the log.`;
+Bold the one key word or phrase per line with **double asterisks**, and put file names and commands in \`backticks\`. No other markdown. Cut filler words, don't greet or speculate beyond the log. For example:
+
+NOW: **Tests pass**, cart totals fixed.
+- Rounding bug was in \`cart.ts\`, **fixed**
+- Added \`cart.test.ts\`, **12 tests** pass
+NEEDS: **Pick** tax rounding: per line or per order?`;
 
 export function excerpt(items: Item[]): string {
   const lines: string[] = [];
