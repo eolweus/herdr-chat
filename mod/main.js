@@ -661,10 +661,10 @@ export default class HerdrChat extends View {
       this.input.set_value(v.slice(0, at - 1) + v.slice(at));
       this.input.set_selected_range({ start: at - 1, end: at - 1 });
     }
-    this.send(cx, e?.secondary);
+    this.sendInput(cx, e?.secondary);
   }
 
-  send(cx, later) {
+  sendInput(cx, later) {
     // A picked command only fills in, so it can take arguments; the next Enter sends.
     const pick = this.commandMatches()[this.commandAt];
     if (pick) return this.complete(pick, cx);
@@ -1174,7 +1174,7 @@ export default class HerdrChat extends View {
     if (k === "enter" || k === "cmd-enter") {
       const at = this.input.selected_range().start;
       this.input.set_selected_range({ start: at, end: at });
-      return this.send(cx, k === "cmd-enter");
+      return this.sendInput(cx, k === "cmd-enter");
     }
     this.vimKey({ keystroke: k, key: k, modifiers: {} }, cx);
   }
