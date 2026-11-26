@@ -129,6 +129,8 @@ export function composer(view, t) {
         .child(div().size(6).rounded(3).bg(machineColor(view.machine)))
         .child(div().child(view.machine ?? "this computer"))))
       .child(div().flex_1())
+      .when(view.vimOn(), (el) => el.child(div().px(6).text_size(11).font_semibold()
+        .text_color(view.vim.mode === "normal" ? t.accent : t.dim).child(view.vim.mode === "normal" ? "NORMAL" : "INSERT")))
       .when(s.busy, (el) => el.child(h_flex().gap(6).px(6).items_center().text_size(11.5).text_color(t.working)
         .child(div().frames(["◐", "◓", "◑", "◒"], 120))
         .child(div().child(s.status ?? "Working"))))

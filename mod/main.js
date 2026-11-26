@@ -22,6 +22,7 @@ import { bodyOf, splitQuotes, withQuotes } from "./quote.js";
 import { Find } from "./find.js";
 import { Since, sinceCard } from "./since.js";
 import { Inbox } from "./inbox.js";
+import { Vim } from "./vim.js";
 
 const DATA = "data/herdr-chat";
 const VIEW_MS = 800;
@@ -103,6 +104,7 @@ export default class HerdrChat extends View {
     this.pickId = null;
     this.resumeId = p.resume ?? null;
     this.since = new Since();
+    this.vim = new Vim();
     this.fakeAway = typeof p.since === "number" ? p.since : null;
     this.commandAt = 0;
     this.handle = cx.focus_handle();
@@ -174,6 +176,7 @@ export default class HerdrChat extends View {
     this.input.on("submit", (e, cx) => this.enter(e, cx));
     this.input.on("paste_other", (_e, cx) => cx.spawn(async (cx) => this.pasteImage(cx)));
     this.input.on("change", (_e, cx) => {
+      if (!this.input.value()) this.vim.reset();
       this.commandAt = 0;
       if (this.slashToken()?.start !== this.dismissed) this.dismissed = null;
       this.renameInput();
@@ -669,7 +672,7 @@ export default class HerdrChat extends View {
     const tok = this.slashToken();
     if (!tok || tok.start === this.dismissed) return [];
     const q = tok.q.toLowerCase();
-    const all = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp" && c.name !== "btw" && c.name !== "model"), { name: "model", description: "Switch model, or agent (Claude or Antigravity) before the first message", hint: "[model]" }, { name: "btw", description: "Ask on the side, in a read-only copy of this chat that doesn't interrupt it or end up in it (Cmd-;)", hint: "[question]" }, { name: "mcp", description: "Manage MCP servers", hint: "" }, { name: "restart-engine", description: "Restart a machine's chat engine, copying the code there first if it's remote (stops running turns)", hint: "[machine]" }, { name: "reload", description: "Reopen this chat in the same pane so it picks up new herdr-chat code", hint: "" }, { name: "move", description: "Move this chat to another machine: the conversation continues there and this pane closes", hint: "<machine> [folder] [--force]" }];
+    const all = [...(this.state.commands ?? []).filter((c) => c.name !== "mcp" && c.name !== "btw" && c.name !== "model"), { name: "model", description: "Switch model, or agent (Claude or Antigravity) before the first message", hint: "[model]" }, { name: "btw", description: "Ask on the side, in a read-only copy of this chat that doesn't interrupt it or end up in it (Cmd-;)", hint: "[question]" }, { name: "mcp", description: "Manage MCP servers", hint: "" }, { name: "restart-engine", description: "Restart a machine's chat engine, copying the code there first if it's remote (stops running turns)", hint: "[machine]" }, { name: "vim", description: `Turn vim keys in this box ${this.vimOn() ? "off" : "on"}`, hint: "" }, { name: "reload", description: "Reopen this chat in the same pane so it picks up new herdr-chat code", hint: "" }, { name: "move", description: "Move this chat to another machine: the conversation continues there and this pane closes", hint: "<machine> [folder] [--force]" }];
     const ours = ["btw", "mcp", "move"];
     const list = this.claudeOnly() ? all : all.filter((c) => !ours.includes(c.name) || (this.state.commands ?? []).some((x) => x.name === c.name));
     const starts = list.filter((c) => c.name.toLowerCase().startsWith(q));
@@ -729,6 +732,13 @@ export default class HerdrChat extends View {
     if (btw) {
       this.input.set_value("");
       return btw[1]?.trim() ? this.side.ask(btw[1], cx) : this.side.show(cx);
+    }
+    if (text === "/vim") {
+      this.input.set_value("");
+      const on = !this.vimOn();
+      setShared("herdr-chat:vim", on);
+      this.vim.reset();
+      return notify({ title: on ? "Vim mode on" : "Vim mode off", body: on ? "Esc for normal mode, i to type again. /vim turns it off." : "" });
     }
     const restart = text.match(/^\/restart-engine(?:\s+(\S+))?$/);
     if (restart) {
@@ -1110,11 +1120,43 @@ export default class HerdrChat extends View {
     else if (this.modeMenu && e.keystroke === "escape") { this.modeMenu = false; cx.notify(); }
     else if (e.keystroke === "cmd-;") this.side.toggle(cx);
     else if (e.keystroke === "escape" && this.selection) this.dismissSelection(cx);
+    else if (this.vimKey(e, cx)) return;
     else if (e.keystroke === "escape" && this.side.focused) { if (this.side.busy) this.side.interrupt(cx); else this.side.close(cx); }
     else if (e.keystroke === "escape" && this.state.busy) this.interrupt(cx);
     else if (e.keystroke === "shift-tab") this.cycleMode(cx);
     else return;
     cx.stop_propagation();
+  }
+
+  vimOn() {
+    return shared("herdr-chat:vim") === true;
+  }
+
+  // True when vim took the key; normal mode swallows the keys it doesn't know so they don't type.
+  vimKey(e, cx) {
+    if (!this.vimOn() || !this.focusedInput) return false;
+    const mods = /^(ctrl|cmd|alt)-/.test(e.keystroke);
+    const k = mods ? e.keystroke : e.key_char ?? e.key;
+    const text = this.input.value();
+    const at = this.input.selected_range().start;
+    const r = this.vim.key(k, text, at);
+    if (!r) {
+      if (this.vim.mode === "normal") this.input.set_selected_range({ start: at, end: at });
+      return false;
+    }
+    if (r.text !== text) {
+      let a = 0, b = 0;
+      while (a < text.length && a < r.text.length && text[a] === r.text[a]) a++;
+      while (b < text.length - a && b < r.text.length - a && text[text.length - 1 - b] === r.text[r.text.length - 1 - b]) b++;
+      this.input.set_selected_range({ start: a, end: text.length - b });
+      this.input.replace(r.text.slice(a, r.text.length - b));
+    }
+    // A one-character selection stands in for vim's block cursor.
+    const block = this.vim.mode === "normal" && r.at < r.text.length && r.text[r.at] !== "\n";
+    this.input.set_selected_range({ start: r.at, end: block ? r.at + 1 : r.at });
+    cx.stop_propagation();
+    cx.notify();
+    return true;
   }
 
   // GPUI doesn't report the scroll offset, so the distance from the bottom is tracked from wheel moves.
