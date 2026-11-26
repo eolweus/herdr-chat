@@ -78,7 +78,12 @@ export class Inbox {
     const terms = ps.filter((p) => p.terminal && p.status === "blocked").map((p) => ({
       kind: "terminal", id: `term/${p.pane}`, name: p.name || p.title || p.program?.name || "Agent", where: [where(p), tilde(p.cwd, this.home)].filter(Boolean).join(" · "), pane: p.pane, program: p.program,
     }));
-    return [...chats, ...terms];
+    const seen = new Set(chats.map((c) => c.pane).filter(Boolean));
+    const stale = ps.filter((p) => p.mod === "herdr-chat" && !seen.has(p.pane) && shared(`herdr-chat:pane:${p.pane}`)?.status === "blocked").map((p) => {
+      const info = shared(`herdr-chat:pane:${p.pane}`);
+      return { kind: "pane", id: `pane/${p.pane}`, name: firstLine(info?.title) || "Chat", where: [where(p), info?.folder].filter(Boolean).join(" · "), pane: p.pane, backend: info?.backend };
+    });
+    return [...chats, ...stale, ...terms];
   }
 
   agent() {
@@ -112,7 +117,7 @@ export class Inbox {
     const t = theme();
     const list = this.list();
     if (!list.length) {
-      return v_flex().size_full().items_center().justify_center().gap(8).bg(t.background).text_color(t.muted)
+      return v_flex().size_full().min_h(0).min_w(0).overflow_hidden().items_center().justify_center().gap(8).bg(t.background).text_color(t.muted)
         .child(div().text_size(28).text_color(t.done).child("✓"))
         .child(div().text_size(17).font_semibold().text_color(t.foreground).child("All clear"))
         .child(div().text_size(13).child("No agent is waiting for you."));
@@ -122,7 +127,7 @@ export class Inbox {
     const item = cur.chat?.item;
     const row = (e) => {
       const on = e.id === cur.id;
-      const icon = e.kind === "chat" ? agentIcon(e.chat.backend ?? "claude", 16, t.muted) : e.program?.icon ? svg(e.program.icon).size(16).text_color(t.muted) : null;
+      const icon = e.kind !== "terminal" ? agentIcon(e.chat?.backend ?? e.backend ?? "claude", 16, t.muted) : e.program?.icon ? svg(e.program.icon).size(16).text_color(t.muted) : null;
       return h_flex().id(`need-${e.id}`).px(10).py(8).gap(10).items_center().rounded(8).cursor_pointer()
         .bg(on ? t.selected : t.background).hover((s) => s.bg(on ? t.selected : t.hover))
         .on_click((_e, cx) => { this.picked = e.id; cx.notify(); })
@@ -134,8 +139,8 @@ export class Inbox {
     };
     const detail = item
       ? (item.kind === "question" ? questionCard(item, t, this) : permissionCard(item, t, this))
-      : div().px(22).text_size(13).text_color(t.muted).child("It's waiting in its terminal. Open it to answer.");
-    return h_flex().id("inbox").size_full().items_start().bg(t.background).text_color(t.foreground)
+      : div().px(22).text_size(13).text_color(t.muted).child(cur.kind === "terminal" ? "It's waiting in its terminal. Open it to answer." : "Its engine can't show the card here yet. Open the chat to answer.");
+    return h_flex().id("inbox").size_full().min_h(0).min_w(0).overflow_hidden().items_start().bg(t.background).text_color(t.foreground)
       .child(v_flex().id("inbox-list").w(320).flex_none().h_full().p(10).gap(2).border_r_1().border_color(t.border).overflow_y_scrollbar()
         .child(div().px(4).pb(6).text_size(15).font_semibold().child(`Needs you · ${list.length}`))
         .children(list.map(row)))
@@ -147,7 +152,7 @@ export class Inbox {
           .child(detail)
           .when(Boolean(cur.pane), (el) => el.child(div().px(22).child(div().id("inbox-open").px(14).h(32).flex().items_center().rounded(8).cursor_pointer().text_size(13)
             .bg(t.solid).text_color(t.solid_foreground).hover((s) => s.opacity(0.9))
-            .on_click(() => this.open(cur)).child(cur.kind === "chat" ? "Open chat" : "Open terminal"))))));
+            .on_click(() => this.open(cur)).child(cur.kind === "terminal" ? "Open terminal" : "Open chat"))))));
   }
 }
 
